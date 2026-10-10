@@ -3,10 +3,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit",
     "test": "node --test --test-isolation=none",
-    "start": "python3 -m http.server 8000",
-    "serve": "npx http-server -p 8000 -c-1"
+    "start": "vite",
+    "preview": "vite preview"
   },
-  "keywords": ["minesweeper", "game"],
-  "license": "MIT"
+  "keywords": [
+    "minesweeper",
+    "game"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
 }

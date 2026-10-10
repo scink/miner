@@ -2,7 +2,14 @@
  * Вспомогательные функции для Minesweeper
  */
 
-import { CELL_STATE } from './Game.js';
+import {
+  CELL_STATE,
+  type Board,
+  type Cell,
+  type GameConfigInput,
+  type StandardDifficulty,
+  type ValidationResult
+} from './Game.ts';
 
 /**
  * Создание пустой доски
@@ -10,10 +17,10 @@ import { CELL_STATE } from './Game.js';
  * @param {number} height
  * @returns {Array<Array<Object>>}
  */
-export function createBoard(width, height) {
-  const board = [];
+export function createBoard(width: number, height: number): Board {
+  const board: Board = [];
   for (let y = 0; y < height; y++) {
-    const row = [];
+    const row: Cell[] = [];
     for (let x = 0; x < width; x++) {
       row.push({
         x,
@@ -39,7 +46,7 @@ export function createBoard(width, height) {
  * @param {number} height
  * @returns {number}
  */
-export function countMines(board, x, y, width, height) {
+export function countMines(board: Board, x: number, y: number, width: number, height: number): number {
   let count = 0;
   
   for (let dy = -1; dy <= 1; dy++) {
@@ -69,8 +76,8 @@ export function countMines(board, x, y, width, height) {
  * @param {number} height
  * @returns {Array<Object>}
  */
-export function getNeighbors(board, x, y, width, height) {
-  const neighbors = [];
+export function getNeighbors(board: Board, x: number, y: number, width: number, height: number): Cell[] {
+  const neighbors: Cell[] = [];
   
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -96,8 +103,8 @@ export function getNeighbors(board, x, y, width, height) {
  * @param {number} boardHeight
  * @returns {Set<string>}
  */
-export function getSafeZone(x, y, boardWidth, boardHeight) {
-  const safeZone = new Set();
+export function getSafeZone(x: number, y: number, boardWidth: number, boardHeight: number): Set<string> {
+  const safeZone = new Set<string>();
   
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -118,17 +125,17 @@ export function getSafeZone(x, y, boardWidth, boardHeight) {
  * @param {Object} config
  * @returns {Object} { valid: boolean, error?: string }
  */
-export function isValidConfig(config) {
+export function isValidConfig(config: GameConfigInput): ValidationResult {
   const { width, height, mines } = config;
   
   // Проверка типов - только конечные целые числа
-  if (!Number.isFinite(width) || !Number.isInteger(width)) {
+  if (typeof width !== 'number' || !Number.isFinite(width) || !Number.isInteger(width)) {
     return { valid: false, error: 'Ширина должна быть конечным целым числом' };
   }
-  if (!Number.isFinite(height) || !Number.isInteger(height)) {
+  if (typeof height !== 'number' || !Number.isFinite(height) || !Number.isInteger(height)) {
     return { valid: false, error: 'Высота должна быть конечным целым числом' };
   }
-  if (!Number.isFinite(mines) || !Number.isInteger(mines)) {
+  if (typeof mines !== 'number' || !Number.isFinite(mines) || !Number.isInteger(mines)) {
     return { valid: false, error: 'Количество мин должно быть конечным целым числом' };
   }
   
@@ -161,7 +168,7 @@ export function isValidConfig(config) {
  * @param {number} value
  * @returns {string}
  */
-export function formatLedNumber(value) {
+export function formatLedNumber(value: number): string {
   const clamped = Math.max(-99, Math.min(999, value));
   const str = clamped.toString();
   
@@ -177,8 +184,8 @@ export function formatLedNumber(value) {
  * @param {number} digit
  * @returns {string}
  */
-export function getDigitColor(digit) {
-  const colors = {
+export function getDigitColor(digit: number): string {
+  const colors: Partial<Record<number, string>> = {
     1: '#0000FF',
     2: '#008000',
     3: '#FF0000',
@@ -196,7 +203,7 @@ export function getDigitColor(digit) {
  * @param {Object} config
  * @returns {string|null}
  */
-export function getStandardDifficulty(config) {
+export function getStandardDifficulty(config: GameConfigInput): StandardDifficulty | null {
   const { width, height, mines } = config;
   
   if (width === 9 && height === 9 && mines === 10) {

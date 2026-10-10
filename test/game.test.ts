@@ -5,11 +5,25 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { Minesweeper, DIFFICULTY, CELL_STATE, STATE } from '../src/Game.js';
-import { isValidConfig, createBoard, countMines, getNeighbors, getSafeZone, formatLedNumber, getStandardDifficulty } from '../src/utils.js';
+import {
+  Minesweeper,
+  DIFFICULTY,
+  CELL_STATE,
+  STATE,
+  type CellMarker,
+  type CellState,
+  type Coordinate
+} from '../src/Game.ts';
+import { isValidConfig, createBoard, countMines, getNeighbors, getSafeZone, formatLedNumber, getStandardDifficulty } from '../src/utils.ts';
+import { UI } from '../src/UI.ts';
 
 // Test helper: deterministic minesweeper for scenarios without timer
-function createDeterministicGame(width, height, mines, mineCoords) {
+function createDeterministicGame(
+  width: number,
+  height: number,
+  mines: number,
+  mineCoords: readonly Coordinate[]
+): Minesweeper {
   const game = new Minesweeper({ width, height, mines });
   // Clear all board mines/states/numbers
   for (let y = 0; y < height; y++) {
@@ -352,10 +366,11 @@ test('Game - Get Standard Difficulty', async () => {
 
 test('Game - Get Cell', async () => {
   const game = new Minesweeper(CONFIG_9x9_10);
+  const cell = game.getCell(2, 2);
   
-  assert.ok(game.getCell(2, 2));
-  assert.strictEqual(game.getCell(2, 2).x, 2);
-  assert.strictEqual(game.getCell(2, 2).y, 2);
+  assert.ok(cell);
+  assert.strictEqual(cell.x, 2);
+  assert.strictEqual(cell.y, 2);
   // Out-of-bounds checks with valid 9x9 board
   assert.strictEqual(game.getCell(-1, 0), null);
   assert.strictEqual(game.getCell(0, -1), null);
@@ -368,6 +383,7 @@ test('Game - Cell States', async () => {
   game.startGame(0, 0);
   
   const cell = game.getCell(1, 1);
+  assert.ok(cell);
   assert.strictEqual(cell.state, CELL_STATE.CLOSED);
   
   game.cycleFlag(1, 1);
@@ -462,6 +478,322 @@ test('Game - Cycle flag returns flagsChanged on state change', async () => {
   assert.strictEqual(game.flags, 0);
   
   game.stopTimer();
+});
+
+test('Game - pause and resume only perform valid state transitions', t => {
+  const game = new Minesweeper(CONFIG_9x9_10);
+  t.after(() => game.stopTimer());
+
+  assert.strictEqual(game.pause(), false);
+  assert.strictEqual(game.state, STATE.READY);
+  assert.strictEqual(game.resume(), false);
+
+  game.startGame(4, 4);
+  assert.strictEqual(game.pause(), true);
+  assert.strictEqual(game.state, STATE.PAUSED);
+  assert.strictEqual(game.timerInterval, null);
+  assert.strictEqual(game.pause(), false);
+
+  assert.strictEqual(game.resume(), true);
+  assert.strictEqual(game.state, STATE.RUNNING);
+  assert.ok(game.timerInterval !== null);
+  assert.strictEqual(game.resume(), false);
+
+  game.stopTimer();
+
+  for (const terminalState of [STATE.WON, STATE.LOST] as const) {
+    game.state = terminalState;
+    assert.strictEqual(game.pause(), false);
+    assert.strictEqual(game.resume(), false);
+    assert.strictEqual(game.state, terminalState);
+  }
+});
+
+test('Game - pause freezes elapsed time and resume continues it', async t => {
+  const game = new Minesweeper(CONFIG_9x9_10);
+  t.after(() => game.stopTimer());
+  game.startGame(4, 4);
+  game.timer = 41;
+
+  assert.strictEqual(game.pause(), true);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.strictEqual(game.timer, 41);
+
+  assert.strictEqual(game.resume(), true);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.strictEqual(game.timer, 42);
+
+  game.stopTimer();
+});
+
+test('Game - reset leaves a paused game ready with a cleared timer', t => {
+  const game = new Minesweeper(CONFIG_9x9_10);
+  t.after(() => game.stopTimer());
+  game.startGame(4, 4);
+  game.timer = 17;
+  assert.strictEqual(game.pause(), true);
+
+  game.reset();
+
+  assert.strictEqual(game.state, STATE.READY);
+  assert.strictEqual(game.timer, 0);
+  assert.strictEqual(game.timerInterval, null);
+});
+
+test('Game - setConfig leaves a paused game ready with the new board', t => {
+  const game = new Minesweeper(CONFIG_9x9_10);
+  t.after(() => game.stopTimer());
+  game.startGame(4, 4);
+  game.timer = 17;
+  assert.strictEqual(game.pause(), true);
+
+  game.setConfig({ width: 16, height: 16, mines: 40 });
+
+  assert.strictEqual(game.state, STATE.READY);
+  assert.strictEqual(game.timer, 0);
+  assert.strictEqual(game.timerInterval, null);
+  assert.strictEqual(game.width, 16);
+  assert.strictEqual(game.height, 16);
+  assert.strictEqual(game.totalMines, 40);
+});
+
+test('Game - reveal returns paused without changing a mine or game state', () => {
+  const game = createDeterministicGame(9, 9, 10, [
+    { x: 0, y: 0 }, { x: 2, y: 1 }, { x: 4, y: 2 }, { x: 6, y: 3 }, { x: 8, y: 4 },
+    { x: 1, y: 5 }, { x: 3, y: 6 }, { x: 5, y: 7 }, { x: 7, y: 8 }, { x: 8, y: 0 }
+  ]);
+  assert.strictEqual(game.pause(), true);
+
+  const result = game.reveal(0, 0);
+
+  assert.deepStrictEqual(result, { result: 'paused', cells: [] });
+  assert.strictEqual(game.state, STATE.PAUSED);
+  assert.strictEqual(game.board[0][0].state, CELL_STATE.CLOSED);
+  assert.strictEqual(game.board[0][0].exploded, false);
+  assert.strictEqual(game.revealedCount, 0);
+});
+
+test('Game - cycleFlag returns paused without changing flags', () => {
+  const game = createDeterministicGame(9, 9, 10, []);
+  assert.strictEqual(game.pause(), true);
+
+  const result = game.cycleFlag(2, 2);
+
+  assert.deepStrictEqual(result, {
+    result: 'paused',
+    state: CELL_STATE.CLOSED,
+    flagsChanged: false
+  });
+  assert.strictEqual(game.state, STATE.PAUSED);
+  assert.strictEqual(game.board[2][2].state, CELL_STATE.CLOSED);
+  assert.strictEqual(game.flags, 0);
+});
+
+test('Game - chord returns paused without revealing eligible neighbors', () => {
+  const game = createDeterministicGame(9, 9, 10, [
+    { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 1 }, { x: 8, y: 2 }, { x: 8, y: 3 },
+    { x: 8, y: 4 }, { x: 8, y: 5 }, { x: 8, y: 6 }, { x: 8, y: 7 }, { x: 8, y: 8 }
+  ]);
+  game.board[1][1].state = CELL_STATE.REVEALED;
+  game.revealedCount = 1;
+  game.cycleFlag(0, 0);
+  assert.strictEqual(game.pause(), true);
+
+  const result = game.chord(1, 1);
+
+  assert.deepStrictEqual(result, { result: 'paused', cells: [] });
+  assert.strictEqual(game.state, STATE.PAUSED);
+  assert.strictEqual(game.board[0][1].state, CELL_STATE.CLOSED);
+  assert.strictEqual(game.board[1][0].state, CELL_STATE.CLOSED);
+  assert.strictEqual(game.flags, 1);
+  assert.strictEqual(game.revealedCount, 1);
+});
+
+test('Game - toggleFlag returns paused without changing flags', () => {
+  const game = createDeterministicGame(9, 9, 10, []);
+  assert.strictEqual(game.pause(), true);
+
+  const result = game.toggleFlag(2, 2);
+
+  assert.deepStrictEqual(result, {
+    result: 'paused',
+    state: CELL_STATE.CLOSED,
+    flagsChanged: false
+  });
+  assert.strictEqual(game.state, STATE.PAUSED);
+  assert.strictEqual(game.board[2][2].state, CELL_STATE.CLOSED);
+  assert.strictEqual(game.flags, 0);
+});
+
+test('Game - applyCellMarker implements every flag and question transition', () => {
+  interface MarkerTransitionCase {
+    initial: CellState;
+    marker: CellMarker;
+    initialFlags: number;
+    expectedState: CellState;
+    expectedFlags: number;
+    flagCountChanged: boolean;
+  }
+
+  const cases: readonly MarkerTransitionCase[] = [
+    {
+      initial: CELL_STATE.CLOSED,
+      marker: 'flag',
+      initialFlags: 0,
+      expectedState: CELL_STATE.FLAGGED,
+      expectedFlags: 1,
+      flagCountChanged: true
+    },
+    {
+      initial: CELL_STATE.FLAGGED,
+      marker: 'flag',
+      initialFlags: 1,
+      expectedState: CELL_STATE.CLOSED,
+      expectedFlags: 0,
+      flagCountChanged: true
+    },
+    {
+      initial: CELL_STATE.QUESTIONED,
+      marker: 'flag',
+      initialFlags: 0,
+      expectedState: CELL_STATE.FLAGGED,
+      expectedFlags: 1,
+      flagCountChanged: true
+    },
+    {
+      initial: CELL_STATE.CLOSED,
+      marker: 'question',
+      initialFlags: 0,
+      expectedState: CELL_STATE.QUESTIONED,
+      expectedFlags: 0,
+      flagCountChanged: false
+    },
+    {
+      initial: CELL_STATE.QUESTIONED,
+      marker: 'question',
+      initialFlags: 0,
+      expectedState: CELL_STATE.CLOSED,
+      expectedFlags: 0,
+      flagCountChanged: false
+    },
+    {
+      initial: CELL_STATE.FLAGGED,
+      marker: 'question',
+      initialFlags: 1,
+      expectedState: CELL_STATE.QUESTIONED,
+      expectedFlags: 0,
+      flagCountChanged: true
+    }
+  ];
+
+  const game = createDeterministicGame(9, 9, 10, []);
+  const cell = game.board[2][2];
+
+  for (const transition of cases) {
+    cell.state = transition.initial;
+    game.flags = transition.initialFlags;
+
+    const result = game.applyCellMarker(cell.x, cell.y, transition.marker);
+
+    assert.deepStrictEqual(result, {
+      result: 'ok',
+      state: transition.expectedState,
+      cellChanged: true,
+      flagCountChanged: transition.flagCountChanged
+    });
+    assert.strictEqual(cell.state, transition.expectedState);
+    assert.strictEqual(game.flags, transition.expectedFlags);
+  }
+});
+
+test('Game - applyCellMarker in READY changes the marker without starting the game or timer', () => {
+  const game = new Minesweeper(CONFIG_9x9_10);
+
+  const result = game.applyCellMarker(2, 2, 'flag');
+
+  assert.deepStrictEqual(result, {
+    result: 'ok',
+    state: CELL_STATE.FLAGGED,
+    cellChanged: true,
+    flagCountChanged: true
+  });
+  assert.strictEqual(game.state, STATE.READY);
+  assert.strictEqual(game.timer, 0);
+  assert.strictEqual(game.timerInterval, null);
+  assert.strictEqual(game.firstReveal, true);
+  assert.strictEqual(game.flags, 1);
+});
+
+test('Game - applyCellMarker is an explicit ok no-op for revealed cells and invalid coordinates', () => {
+  const game = createDeterministicGame(9, 9, 10, []);
+  const cell = game.board[2][2];
+  cell.state = CELL_STATE.REVEALED;
+  game.flags = 3;
+
+  assert.deepStrictEqual(game.applyCellMarker(2, 2, 'flag'), {
+    result: 'ok',
+    state: CELL_STATE.REVEALED,
+    cellChanged: false,
+    flagCountChanged: false
+  });
+  assert.strictEqual(cell.state, CELL_STATE.REVEALED);
+  assert.strictEqual(game.flags, 3);
+
+  for (const { x, y } of [
+    { x: -1, y: 0 },
+    { x: 0, y: -1 },
+    { x: game.width, y: 0 },
+    { x: 0, y: game.height }
+  ]) {
+    assert.deepStrictEqual(game.applyCellMarker(x, y, 'question'), {
+      result: 'ok',
+      state: undefined,
+      cellChanged: false,
+      flagCountChanged: false
+    });
+  }
+  assert.strictEqual(game.flags, 3);
+});
+
+test('Game - applyCellMarker is a paused no-op', () => {
+  const game = createDeterministicGame(9, 9, 10, []);
+  const cell = game.board[2][2];
+  cell.state = CELL_STATE.FLAGGED;
+  game.flags = 1;
+  assert.strictEqual(game.pause(), true);
+
+  const result = game.applyCellMarker(2, 2, 'question');
+
+  assert.deepStrictEqual(result, {
+    result: 'paused',
+    state: CELL_STATE.FLAGGED,
+    cellChanged: false,
+    flagCountChanged: false
+  });
+  assert.strictEqual(cell.state, CELL_STATE.FLAGGED);
+  assert.strictEqual(game.flags, 1);
+});
+
+test('Game - applyCellMarker is a terminal no-op after both win and loss', () => {
+  for (const terminalState of [STATE.WON, STATE.LOST] as const) {
+    for (const marker of ['flag', 'question'] as const satisfies readonly CellMarker[]) {
+      const game = createDeterministicGame(9, 9, 10, []);
+      const cell = game.board[2][2];
+      game.state = terminalState;
+      game.flags = 3;
+
+      const result = game.applyCellMarker(2, 2, marker);
+
+      assert.deepStrictEqual(result, {
+        result: 'terminal',
+        state: CELL_STATE.CLOSED,
+        cellChanged: false,
+        flagCountChanged: false
+      });
+      assert.strictEqual(cell.state, CELL_STATE.CLOSED);
+      assert.strictEqual(game.flags, 3);
+    }
+  }
 });
 
 // Export for Node.js test runner

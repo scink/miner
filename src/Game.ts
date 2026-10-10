@@ -3,47 +3,134 @@
  *完全 отделённая от DOM логика игры
  */
 
-import { createBoard, countMines, getNeighbors, getSafeZone, isValidConfig } from './utils.js';
+import { createBoard, countMines, getNeighbors, getSafeZone, isValidConfig } from './utils.ts';
 
-// Helper function to validate config and throw if invalid
-function assertValidConfig(config) {
-  const { valid, error } = isValidConfig(config);
-  if (!valid) {
-    throw new RangeError(error);
-  }
+export interface GameConfig {
+  width: number;
+  height: number;
+  mines: number;
+  label?: StandardDifficulty;
+}
+
+export interface GameConfigInput {
+  width: unknown;
+  height: unknown;
+  mines: unknown;
+  label?: StandardDifficulty;
+}
+
+export type StandardDifficulty = 'beginner' | 'intermediate' | 'expert';
+
+export interface DifficultyConfig extends GameConfig {
+  label: StandardDifficulty;
 }
 
 export const DIFFICULTY = {
   BEGINNER: { width: 9, height: 9, mines: 10, label: 'beginner' },
   INTERMEDIATE: { width: 16, height: 16, mines: 40, label: 'intermediate' },
   EXPERT: { width: 30, height: 16, mines: 99, label: 'expert' }
-};
+} as const satisfies Record<'BEGINNER' | 'INTERMEDIATE' | 'EXPERT', DifficultyConfig>;
 
 export const STATE = {
   READY: 'ready',
   RUNNING: 'running',
+  PAUSED: 'paused',
   WON: 'won',
   LOST: 'lost'
-};
+} as const;
+
+export type GameState = typeof STATE[keyof typeof STATE];
 
 export const CELL_STATE = {
   CLOSED: 'closed',
   FLAGGED: 'flagged',
   QUESTIONED: 'questioned',
   REVEALED: 'revealed'
-};
+} as const;
+
+export type CellState = typeof CELL_STATE[keyof typeof CELL_STATE];
+
+export type CellMarker = 'flag' | 'question';
+
+export interface Coordinate {
+  x: number;
+  y: number;
+}
+
+export interface Cell extends Coordinate {
+  isMine: boolean;
+  neighbors: number;
+  state: CellState;
+  exploded: boolean;
+  wrongFlag: boolean;
+}
+
+export type Board = Cell[][];
+
+export type ValidationResult =
+  | { valid: true }
+  | { valid: false; error: string };
+
+export interface GameSnapshot {
+  state: GameState;
+  timer: number;
+  flags: number;
+  mines: number;
+  minesLeft: number;
+  revealedCount: number;
+  totalCells: number;
+}
+
+export interface RevealResult {
+  result: 'ok' | 'flagged' | 'paused' | 'terminal';
+  cells: Cell[];
+}
+
+export interface FlagCycleResult {
+  result: 'ok' | 'paused' | 'terminal';
+  state: CellState | undefined;
+  flagsChanged: boolean;
+}
+
+export interface CellMarkerResult {
+  result: 'ok' | 'paused' | 'terminal';
+  state: CellState | undefined;
+  cellChanged: boolean;
+  flagCountChanged: boolean;
+}
+
+// Helper function to validate config and throw if invalid
+function assertValidConfig(config: GameConfigInput): asserts config is GameConfig {
+  const validation = isValidConfig(config);
+  if (!validation.valid) {
+    throw new RangeError(validation.error);
+  }
+}
 
 /**
  * Класс Minesweeper - ядро игры, полностью автономен от DOM
  */
 export class Minesweeper {
+  width: number;
+  height: number;
+  totalMines: number;
+  config: GameConfig;
+  board: Board = [];
+  state: GameState = STATE.READY;
+  flags = 0;
+  timer = 0;
+  timerInterval: ReturnType<typeof setInterval> | null = null;
+  firstReveal = true;
+  revealedCount = 0;
+  gameOver = false;
+
   /**
    * @param {Object} config
    * @param {number} config.width - ширина доски (9-30)
    * @param {number} config.height - высота доски (9-24)
    * @param {number} config.mines - количество мин
    */
-  constructor(config = { width: 9, height: 9, mines: 10 }) {
+  constructor(config: GameConfigInput = { width: 9, height: 9, mines: 10 }) {
     assertValidConfig(config);
     this.width = config.width;
     this.height = config.height;
@@ -55,7 +142,7 @@ export class Minesweeper {
   /**
    * Сброс игры в начальное состояние
    */
-  reset() {
+  reset(): void {
     this.stopTimer();
     this.board = createBoard(this.width, this.height);
     this.state = STATE.READY;
@@ -71,7 +158,7 @@ export class Minesweeper {
    * Установка конфигурации
    * @param {Object} config
    */
-  setConfig(config) {
+  setConfig(config: GameConfigInput): void {
     assertValidConfig(config);
     this.width = config.width;
     this.height = config.height;
@@ -84,7 +171,7 @@ export class Minesweeper {
    * Получение конфигурации
    * @returns {Object}
    */
-  getConfig() {
+  getConfig(): GameConfig {
     return { ...this.config };
   }
 
@@ -92,7 +179,7 @@ export class Minesweeper {
    * Получение текущего состояния игры
    * @returns {Object}
    */
-  getState() {
+  getState(): GameSnapshot {
     return {
       state: this.state,
       timer: this.timer,
@@ -110,7 +197,7 @@ export class Minesweeper {
    * @param {number} y
    * @returns {Object|null}
    */
-  getCell(x, y) {
+  getCell(x: number, y: number): Cell | null {
     if (x < 0 || x >= this.width || y < 0 || y >= this.height) {
       return null;
     }
@@ -122,7 +209,7 @@ export class Minesweeper {
    * @param {Object} config
    * @returns {Object} { valid: boolean, error?: string }
    */
-  static validateConfig(config) {
+  static validateConfig(config: GameConfigInput): ValidationResult {
     return isValidConfig(config);
   }
 
@@ -132,7 +219,7 @@ export class Minesweeper {
    * @param {number} startX
    * @param {number} startY
    */
-  startGame(startX, startY) {
+  startGame(startX: number, startY: number): void {
     if (this.state !== STATE.READY) {
       return;
     }
@@ -155,13 +242,39 @@ export class Minesweeper {
   }
 
   /**
+   * Приостанавливает только активную игру, сохраняя прошедшее время.
+   */
+  pause(): boolean {
+    if (this.state !== STATE.RUNNING) {
+      return false;
+    }
+
+    this.stopTimer();
+    this.state = STATE.PAUSED;
+    return true;
+  }
+
+  /**
+   * Возобновляет только приостановленную игру и продолжает таймер.
+   */
+  resume(): boolean {
+    if (this.state !== STATE.PAUSED) {
+      return false;
+    }
+
+    this.state = STATE.RUNNING;
+    this.startTimer();
+    return true;
+  }
+
+  /**
    * Расстановка мин методом полного Fisher-Yates
    * Создаем список всех доступных клеток и перемешиваем
    * @param {Set<string>} excluded - координаты, исключённые из размещения мин
    */
-  placeMines(excluded) {
+  placeMines(excluded: ReadonlySet<string>): void {
     const totalCells = this.width * this.height;
-    const available = [];
+    const available: Coordinate[] = [];
     
     // Собираем доступные клетки
     for (let i = 0; i < totalCells; i++) {
@@ -195,7 +308,7 @@ export class Minesweeper {
   /**
    * Вычисление чисел вокруг мин
    */
-  calculateNumbers() {
+  calculateNumbers(): void {
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         if (!this.board[y][x].isMine) {
@@ -211,7 +324,7 @@ export class Minesweeper {
    * @param {number} y
    * @returns {Array}
    */
-  getNeighbors(x, y) {
+  getNeighbors(x: number, y: number): Cell[] {
     return getNeighbors(this.board, x, y, this.width, this.height);
   }
 
@@ -219,9 +332,13 @@ export class Minesweeper {
    * Раскрытие клетки (Left Click) - ИТЕРАТИВНЫЙ flood fill
    * @param {number} x
    * @param {number} y
-   * @returns {Object} { result: 'ok'|'flagged'|'terminal', cells: Array }
+   * @returns {Object} { result: 'ok'|'flagged'|'paused'|'terminal', cells: Array }
    */
-  reveal(x, y) {
+  reveal(x: number, y: number): RevealResult {
+    if (this.state === STATE.PAUSED) {
+      return { result: 'paused', cells: [] };
+    }
+
     const cell = this.getCell(x, y);
     
     // Проверки
@@ -262,7 +379,7 @@ export class Minesweeper {
     }
     
     // Возвращаем результат
-    if (this.state === STATE.WON) {
+    if (this.hasState(STATE.WON)) {
       return { result: 'terminal', cells: this.getAllCells() };
     }
     
@@ -275,13 +392,15 @@ export class Minesweeper {
    * @param {number} startY
    * @returns {Array} раскрытые клетки
    */
-  revealFlood(startX, startY) {
-    const revealed = [];
-    const stack = [[startX, startY]];
-    const visited = new Set();
+  revealFlood(startX: number, startY: number): Cell[] {
+    const revealed: Cell[] = [];
+    const stack: Array<[number, number]> = [[startX, startY]];
+    const visited = new Set<string>();
     
     while (stack.length > 0) {
-      const [x, y] = stack.pop();
+      const position = stack.pop();
+      if (!position) break;
+      const [x, y] = position;
       const key = `${x},${y}`;
       
       if (visited.has(key)) continue;
@@ -319,21 +438,25 @@ export class Minesweeper {
    * closed -> flagged -> questioned -> closed
    * @param {number} x
    * @param {number} y
-   * @returns {Object} { state: new state, flagsChanged: boolean }
+   * @returns {Object} { result, state: new state, flagsChanged: boolean }
    */
-  cycleFlag(x, y) {
+  cycleFlag(x: number, y: number): FlagCycleResult {
     const cell = this.getCell(x, y);
+
+    if (this.state === STATE.PAUSED) {
+      return { result: 'paused', state: cell?.state, flagsChanged: false };
+    }
     
     if (!cell || cell.state === CELL_STATE.REVEALED) {
-      return { state: cell?.state, flagsChanged: false };
+      return { result: 'ok', state: cell?.state, flagsChanged: false };
     }
     
     // Если уже проиграли или выиграли - не делаем ничего
     if (this.state === STATE.LOST || this.state === STATE.WON) {
-      return { state: cell.state, flagsChanged: false };
+      return { result: 'terminal', state: cell.state, flagsChanged: false };
     }
     
-    const states = [CELL_STATE.CLOSED, CELL_STATE.FLAGGED, CELL_STATE.QUESTIONED];
+    const states: CellState[] = [CELL_STATE.CLOSED, CELL_STATE.FLAGGED, CELL_STATE.QUESTIONED];
     const currentIndex = states.indexOf(cell.state);
     const nextState = states[(currentIndex + 1) % states.length];
     
@@ -352,16 +475,75 @@ export class Minesweeper {
     cell.state = nextState;
     this.flags += flagsDelta;
     
-    return { state: nextState, flagsChanged: true };
+    return { result: 'ok', state: nextState, flagsChanged: true };
+  }
+
+  /**
+   * Применяет выбранный UI-маркер без циклического переключения.
+   * Повторный выбор активного маркера снимает его, другой маркер заменяет текущий.
+   */
+  applyCellMarker(x: number, y: number, marker: CellMarker): CellMarkerResult {
+    const cell = this.getCell(x, y);
+
+    if (this.state === STATE.PAUSED) {
+      return {
+        result: 'paused',
+        state: cell?.state,
+        cellChanged: false,
+        flagCountChanged: false
+      };
+    }
+
+    if (this.state === STATE.LOST || this.state === STATE.WON) {
+      return {
+        result: 'terminal',
+        state: cell?.state,
+        cellChanged: false,
+        flagCountChanged: false
+      };
+    }
+
+    if (!cell || cell.state === CELL_STATE.REVEALED) {
+      return {
+        result: 'ok',
+        state: cell?.state,
+        cellChanged: false,
+        flagCountChanged: false
+      };
+    }
+
+    const markerState = marker === 'flag' ? CELL_STATE.FLAGGED : CELL_STATE.QUESTIONED;
+    const nextState = cell.state === markerState ? CELL_STATE.CLOSED : markerState;
+    const wasFlagged = cell.state === CELL_STATE.FLAGGED;
+    const willBeFlagged = nextState === CELL_STATE.FLAGGED;
+
+    if (wasFlagged && !willBeFlagged) {
+      this.flags--;
+    } else if (!wasFlagged && willBeFlagged) {
+      this.flags++;
+    }
+
+    cell.state = nextState;
+
+    return {
+      result: 'ok',
+      state: nextState,
+      cellChanged: true,
+      flagCountChanged: wasFlagged !== willBeFlagged
+    };
   }
 
   /**
    * Chording: раскрытие соседей при равенстве флагов и цифры
    * @param {number} x
    * @param {number} y
-   * @returns {Object} { result: 'ok'|'terminal', cells: Array }
+   * @returns {Object} { result: 'ok'|'paused'|'terminal', cells: Array }
    */
-  chord(x, y) {
+  chord(x: number, y: number): RevealResult {
+    if (this.state === STATE.PAUSED) {
+      return { result: 'paused', cells: [] };
+    }
+
     const cell = this.getCell(x, y);
     
     if (!cell || cell.state !== CELL_STATE.REVEALED || cell.neighbors === 0) {
@@ -379,7 +561,7 @@ export class Minesweeper {
     
     // Если флагов совпадает с цифрой
     if (flagCount === cell.neighbors) {
-      const revealed = [];
+      const revealed: Cell[] = [];
       
       for (const neighbor of neighbors) {
         // Reveal CLOSED and QUESTIONED cells (but not FLAGGED or already REVEALED)
@@ -402,26 +584,35 @@ export class Minesweeper {
    * Установка/снятие флага (для клавиатуры)
    * @param {number} x
    * @param {number} y
+   * @returns {Object} { result, state: new state, flagsChanged: boolean }
    */
-  toggleFlag(x, y) {
+  toggleFlag(x: number, y: number): FlagCycleResult {
     const cell = this.getCell(x, y);
+
+    if (this.state === STATE.PAUSED) {
+      return { result: 'paused', state: cell?.state, flagsChanged: false };
+    }
     
     if (!cell || cell.state === CELL_STATE.REVEALED) {
-      return;
+      return { result: 'ok', state: cell?.state, flagsChanged: false };
     }
     
     // Если уже проиграли или выиграли - не делаем ничего
     if (this.state === STATE.LOST || this.state === STATE.WON) {
-      return;
+      return { result: 'terminal', state: cell.state, flagsChanged: false };
     }
     
     if (cell.state === CELL_STATE.CLOSED) {
       cell.state = CELL_STATE.FLAGGED;
       this.flags++;
+      return { result: 'ok', state: cell.state, flagsChanged: true };
     } else if (cell.state === CELL_STATE.FLAGGED) {
       cell.state = CELL_STATE.CLOSED;
       this.flags--;
+      return { result: 'ok', state: cell.state, flagsChanged: true };
     }
+
+    return { result: 'ok', state: cell.state, flagsChanged: false };
   }
 
   /**
@@ -429,7 +620,7 @@ export class Minesweeper {
    * @param {number} explodedX
    * @param {number} explodedY
    */
-  loseGame(explodedX, explodedY) {
+  loseGame(explodedX: number, explodedY: number): void {
     this.state = STATE.LOST;
     this.stopTimer();
     
@@ -455,7 +646,7 @@ export class Minesweeper {
   /**
    * Победа - поставить флаги на оставшиеся мины
    */
-  winGame() {
+  winGame(): void {
     this.state = STATE.WON;
     this.stopTimer();
     this.timer = Math.min(999, this.timer);
@@ -477,8 +668,8 @@ export class Minesweeper {
    * Получить все клетки (для полной перерисовки)
    * @returns {Array}
    */
-  getAllCells() {
-    const cells = [];
+  getAllCells(): Cell[] {
+    const cells: Cell[] = [];
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         cells.push(this.board[y][x]);
@@ -491,8 +682,8 @@ export class Minesweeper {
    * Получить все раскрытые клетки (для отрисовки)
    * @returns {Array}
    */
-  getRevealedCells() {
-    const cells = [];
+  getRevealedCells(): Cell[] {
+    const cells: Cell[] = [];
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         if (this.board[y][x].state === CELL_STATE.REVEALED) {
@@ -506,7 +697,7 @@ export class Minesweeper {
   /**
    * Запуск таймера
    */
-  startTimer() {
+  startTimer(): void {
     this.stopTimer();
     this.timerInterval = setInterval(() => {
       if (this.timer < 999) {
@@ -518,11 +709,15 @@ export class Minesweeper {
   /**
    * Остановка таймера
    */
-  stopTimer() {
+  stopTimer(): void {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
+  }
+
+  private hasState(state: GameState): boolean {
+    return this.state === state;
   }
 
   /**
@@ -532,10 +727,10 @@ export class Minesweeper {
    * @param {number} mines
    * @returns {Object}
    */
-  static isValidConfig(width, height, mines) {
+  static isValidConfig(width: unknown, height: unknown, mines: unknown): ValidationResult {
     return isValidConfig({ width, height, mines });
   }
 }
 
 // Экспорт утилит
-export * from './utils.js';
+export * from './utils.ts';

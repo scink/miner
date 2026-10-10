@@ -3,13 +3,64 @@
  * Инициализация игры и UI
  */
 
-import { Minesweeper, DIFFICULTY } from './Game.js';
-import { UI } from './UI.js';
+import {
+  Minesweeper,
+  DIFFICULTY,
+  type GameConfig,
+  type GameConfigInput,
+  type StandardDifficulty
+} from './Game.ts';
+import { UI } from './UI.ts';
+
+type Difficulty = StandardDifficulty | 'custom';
+type StoredConfig = Record<string, unknown>;
+
+declare global {
+  interface Window {
+    Minesweeper: typeof Minesweeper;
+    DIFFICULTY: typeof DIFFICULTY;
+  }
+}
+
+function isRecord(value: unknown): value is StoredConfig {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseStoredConfig(value: string): StoredConfig {
+  const parsed: unknown = JSON.parse(value);
+  return isRecord(parsed) ? parsed : {};
+}
+
+function parseStoredConfigOrEmpty(value: string): StoredConfig {
+  try {
+    return parseStoredConfig(value);
+  } catch {
+    return {};
+  }
+}
+
+function toGameConfigInput(value: unknown): GameConfigInput {
+  if (!isRecord(value)) {
+    return { width: undefined, height: undefined, mines: undefined };
+  }
+
+  return {
+    width: value.width,
+    height: value.height,
+    mines: value.mines
+  };
+}
+
+function hasNumericGameConfig(config: GameConfigInput): config is GameConfig {
+  return typeof config.width === 'number'
+    && typeof config.height === 'number'
+    && typeof config.mines === 'number';
+}
 
 /**
  * Безопасное чтение из localStorage
  */
-function getSafeStorage(key) {
+function getSafeStorage(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch (e) {
@@ -20,7 +71,7 @@ function getSafeStorage(key) {
 /**
  * Безопасная запись в localStorage
  */
-function setSafeStorage(key, value) {
+function setSafeStorage(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch (e) {
@@ -32,7 +83,7 @@ function setSafeStorage(key, value) {
  * Получение стандартной сложности
  * Returns valid difficulty string or null if not standard
  */
-function getStandardDifficulty(config) {
+function getStandardDifficulty(config: GameConfigInput): StandardDifficulty | null {
   const { width, height, mines } = config;
   
   if (width === 9 && height === 9 && mines === 10) {
@@ -52,34 +103,44 @@ function getStandardDifficulty(config) {
  * Validate and normalize difficulty value
  * Returns valid difficulty or 'beginner' fallback
  */
-function normalizeDifficulty(difficulty) {
-  const validDifficulties = ['beginner', 'intermediate', 'expert', 'custom'];
-  if (validDifficulties.includes(difficulty)) {
-    return difficulty;
+function normalizeDifficulty(difficulty: unknown): Difficulty {
+  switch (difficulty) {
+    case 'beginner':
+    case 'intermediate':
+    case 'expert':
+    case 'custom':
+      return difficulty;
+    default:
+      return 'beginner';
   }
-  return 'beginner';
 }
 
 /**
  * Инициализация игры
  */
-function initGame() {
+function initGame(): void {
   // Получаем сохранённый конфиг
   const savedConfig = getSafeStorage('minesweeper-config');
-  let initialDifficulty = 'beginner';
-  let customConfig = null;
+  let initialDifficulty: Difficulty = 'beginner';
+  let customConfig: GameConfig | null = null;
   
   if (savedConfig) {
     try {
-      const parsed = JSON.parse(savedConfig);
+      const parsed = parseStoredConfig(savedConfig);
       if (parsed.difficulty) {
         // Validate and normalize difficulty - fallback to 'beginner' if invalid
         const normalized = normalizeDifficulty(parsed.difficulty);
         if (normalized === 'custom') {
           // Custom requires valid custom config object
           if (parsed.custom) {
-            customConfig = parsed.custom;
-            initialDifficulty = 'custom';
+            const candidate = toGameConfigInput(parsed.custom);
+            const validation = Minesweeper.validateConfig(candidate);
+            if (validation.valid && hasNumericGameConfig(candidate)) {
+              customConfig = candidate;
+              initialDifficulty = 'custom';
+            } else if (!validation.valid) {
+              console.warn('Неверный сохранённый custom config, используем beginner:', validation.error);
+            }
           } else {
             // No custom config - fallback to beginner
             initialDifficulty = 'beginner';
@@ -95,16 +156,6 @@ function initGame() {
     }
   }
   
-  // Валидация конфига
-  if (initialDifficulty === 'custom' && customConfig) {
-    const validation = Minesweeper.isValidConfig(customConfig.width, customConfig.height, customConfig.mines);
-    if (!validation.valid) {
-      console.warn('Неверный сохранённый custom config, используем beginner:', validation.error);
-      initialDifficulty = 'beginner';
-      customConfig = null;
-    }
-  }
-  
   // Создаём игру с начальной конфигурацией
   const game = new Minesweeper(DIFFICULTY.BEGINNER);
   
@@ -112,8 +163,12 @@ function initGame() {
   const ui = new UI(game);
   
   // Устанавливаем начальный режим
-  if (initialDifficulty === 'custom' && customConfig) {
-    ui.setDifficultyFromConfig(customConfig);
+  if (initialDifficulty === 'custom') {
+    if (customConfig) {
+      ui.setDifficultyFromConfig(customConfig);
+    } else {
+      ui.setInitialDifficulty('beginner');
+    }
   } else {
     ui.setInitialDifficulty(initialDifficulty);
   }
@@ -128,11 +183,10 @@ function initGame() {
   
   // Сохранение конфигурации при смене режима через setConfig
   const originalSetConfig = game.setConfig.bind(game);
-  game.setConfig = function(config) {
+  game.setConfig = function(config: GameConfigInput): void {
     const standard = getStandardDifficulty(config);
     const savedConfig = getSafeStorage('minesweeper-config') || '{}';
-    let cfg = {};
-    try { cfg = JSON.parse(savedConfig); } catch (e) {}
+    const cfg = parseStoredConfigOrEmpty(savedConfig);
     
     if (standard) {
       cfg.difficulty = standard;
@@ -148,10 +202,9 @@ function initGame() {
   
   // Обновление сложности в UI
   const originalSetDifficulty = ui.setDifficulty.bind(ui);
-  ui.setDifficulty = function(difficulty) {
+  ui.setDifficulty = function(difficulty: string): void {
     const savedConfig = getSafeStorage('minesweeper-config') || '{}';
-    let cfg = {};
-    try { cfg = JSON.parse(savedConfig); } catch (e) {}
+    const cfg = parseStoredConfigOrEmpty(savedConfig);
     
     if (difficulty === 'custom') {
       cfg.difficulty = 'custom';
@@ -167,7 +220,7 @@ function initGame() {
   
   // Установка custom конфига
   const originalSetDifficultyFromConfig = ui.setDifficultyFromConfig.bind(ui);
-  ui.setDifficultyFromConfig = function(config) {
+  ui.setDifficultyFromConfig = function(config: GameConfig): void {
     const standard = getStandardDifficulty(config);
     if (standard) {
       ui.setDifficulty(standard);
