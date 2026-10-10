@@ -1,0 +1,12 @@
+{
+  "name": "minesweeper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none",
+    "start": "python3 -m http.server 8000",
+    "serve": "npx http-server -p 8000 -c-1"
+  },
+  "keywords": ["minesweeper", "game"],
+  "license": "MIT"
+}
