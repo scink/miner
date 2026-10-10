@@ -115,7 +115,7 @@ Review permissions, artifact path, environment, concurrency, dev base, and `git 
 
 **Interfaces:**
 - Consumes: an optional host shaped like `Window` with optional `Telegram.WebApp`.
-- Produces: `TelegramColorScheme = 'light' | 'dark'`; `TelegramBridge` with `isAvailable`, `getColorScheme()`, `onThemeChanged(listener)`, `ready()`, and `expand()`; `createTelegramBridge(host?: Window): TelegramBridge`.
+- Produces: `TelegramColorScheme = 'light' | 'dark'`; `TelegramBridge` with `isAvailable`, `getColorScheme(): TelegramColorScheme | null`, `onThemeChanged(listener)`, `ready()`, and `expand()`; `createTelegramBridge(host?: Window): TelegramBridge`.
 
 - [ ] **Step 1: Write failing bridge tests**
 
@@ -129,7 +129,7 @@ Expected: FAIL because `src/telegram.ts` does not exist.
 
 - [ ] **Step 3: Implement the bridge**
 
-Treat a WebApp as available only when its platform is a non-empty value other than `unknown`. Every SDK call is guarded by method checks and `try/catch`. `onThemeChanged` returns a no-op disposer when subscription is unavailable.
+Treat a WebApp as available only when its platform is a non-empty value other than `unknown`. `getColorScheme()` returns `null` when Telegram is unavailable, reports an invalid scheme, or throws. Every SDK call is guarded by method checks and `try/catch`. `onThemeChanged` returns a no-op disposer when subscription is unavailable.
 
 - [ ] **Step 4: Run focused tests, typecheck, and the full suite**
 
