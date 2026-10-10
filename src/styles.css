@@ -102,10 +102,19 @@
 body {
   margin: 0;
   padding: 20px;
+  /* Safe-area layout for Telegram Mini App */
+  padding-top: var(--tg-content-safe-area-inset-top, env(safe-area-inset-top, 20px));
+  padding-right: var(--tg-content-safe-area-inset-right, env(safe-area-inset-right, 20px));
+  padding-bottom: var(--tg-content-safe-area-inset-bottom, env(safe-area-inset-bottom, 20px));
+  padding-left: var(--tg-content-safe-area-inset-left, env(safe-area-inset-left, 20px));
   background-color: var(--desktop-bg);
   color: var(--text-color);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  min-height: 100vh;
+  /* Use 100dvh as the viewport unit, with Telegram stable viewport variable as fallback */
+  min-height: 100dvh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  /* Allow scrolling at zoom 200% */
+  overflow: auto;
   display: flex;
   justify-content: safe center;
   align-items: flex-start;
@@ -506,7 +515,9 @@ body {
 /* Responsive adjustments for narrow viewports */
 @media (max-width: 768px) {
   body {
-    padding: 0;
+    /* Preserve safe-area padding - do not reset to 0 */
+    padding-left: var(--tg-content-safe-area-inset-left, env(safe-area-inset-left, 20px));
+    padding-right: var(--tg-content-safe-area-inset-right, env(safe-area-inset-right, 20px));
     align-items: flex-start;
   }
   
@@ -872,30 +883,6 @@ body {
 
 .info-content p {
   margin: 8px 0;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  body {
-    padding: 0;
-    align-items: flex-start;
-  }
-  
-  .window {
-    max-width: 100%;
-  }
-  
-  .title-bar {
-    font-size: 12px;
-  }
-  
-  .menubar {
-    font-size: 12px;
-  }
-  
-  .menubar .menu-item {
-    padding: 2px 4px;
-  }
 }
 
 /* Accessibility */

@@ -11,6 +11,9 @@ import {
   type StandardDifficulty
 } from './Game.ts';
 import { UI } from './UI.ts';
+import { ThemeController } from './theme.ts';
+import { createTelegramBridge } from './telegram.ts';
+import { initializePlatformUi } from './platform.ts';
 
 type Difficulty = StandardDifficulty | 'custom';
 type StoredConfig = Record<string, unknown>;
@@ -119,7 +122,7 @@ function normalizeDifficulty(difficulty: unknown): Difficulty {
  * Инициализация игры
  */
 function initGame(): void {
-  // Получаем сохранённый конфиг
+  // Get saved config (same as original - before any UI creation)
   const savedConfig = getSafeStorage('minesweeper-config');
   let initialDifficulty: Difficulty = 'beginner';
   let customConfig: GameConfig | null = null;
@@ -128,10 +131,8 @@ function initGame(): void {
     try {
       const parsed = parseStoredConfig(savedConfig);
       if (parsed.difficulty) {
-        // Validate and normalize difficulty - fallback to 'beginner' if invalid
         const normalized = normalizeDifficulty(parsed.difficulty);
         if (normalized === 'custom') {
-          // Custom requires valid custom config object
           if (parsed.custom) {
             const candidate = toGameConfigInput(parsed.custom);
             const validation = Minesweeper.validateConfig(candidate);
@@ -142,7 +143,6 @@ function initGame(): void {
               console.warn('Неверный сохранённый custom config, используем beginner:', validation.error);
             }
           } else {
-            // No custom config - fallback to beginner
             initialDifficulty = 'beginner';
             customConfig = null;
           }
@@ -156,34 +156,63 @@ function initGame(): void {
     }
   }
   
-  // Создаём игру с начальной конфигурацией
-  const game = new Minesweeper(DIFFICULTY.BEGINNER);
+  // Create Telegram bridge (safe no-op if SDK not available)
+  const telegram = createTelegramBridge(window);
   
-  // Создаём UI
-  const ui = new UI(game);
-  
-  // Устанавливаем начальный режим
-  if (initialDifficulty === 'custom') {
-    if (customConfig) {
-      ui.setDifficultyFromConfig(customConfig);
-    } else {
-      ui.setInitialDifficulty('beginner');
-    }
-  } else {
-    ui.setInitialDifficulty(initialDifficulty);
-  }
-  
-  // Обработка глобальных клавиш
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'F2') {
-      e.preventDefault();
-      ui.resetGame();
-    }
+  // Create theme controller with proper dependencies
+  const themeController = new ThemeController({
+    root: document.documentElement,
+    storage: {
+      getItem(key: string): string | null {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      },
+      setItem(key: string, value: string): void {
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          // Ignore errors
+        }
+      },
+    },
+    mediaQuery: typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : undefined,
+    telegram,
   });
   
-  // Сохранение конфигурации при смене режима через setConfig
-  const originalSetConfig = game.setConfig.bind(game);
-  game.setConfig = function(config: GameConfigInput): void {
+  // Platform initialization with required startup order:
+  // theme.start() -> createUi() -> telegram.ready() -> telegram.expand()
+  const ui = initializePlatformUi(
+    themeController,
+    () => {
+      // Create game with default difficulty
+      const game = new Minesweeper(DIFFICULTY.BEGINNER);
+
+      // Create UI with theme controller integration
+      const ui = new UI(game, themeController);
+
+      // Set initial difficulty
+      if (initialDifficulty === 'custom') {
+        if (customConfig) {
+          ui.setDifficultyFromConfig(customConfig);
+        } else {
+          ui.setInitialDifficulty('beginner');
+        }
+      } else {
+        ui.setInitialDifficulty(initialDifficulty);
+      }
+
+      return ui;
+    },
+    telegram
+  );
+
+  // The UI returned by initializePlatformUi has the game accessible as ui.game.
+  // Re-wire the game's setConfig to save to localStorage using ui.game.
+  const originalSetConfig = ui.game.setConfig.bind(ui.game);
+  ui.game.setConfig = function(config: GameConfigInput): void {
     const standard = getStandardDifficulty(config);
     const savedConfig = getSafeStorage('minesweeper-config') || '{}';
     const cfg = parseStoredConfigOrEmpty(savedConfig);
@@ -200,7 +229,7 @@ function initGame(): void {
     originalSetConfig(config);
   };
   
-  // Обновление сложности в UI
+  // Re-wire setDifficulty to save to localStorage
   const originalSetDifficulty = ui.setDifficulty.bind(ui);
   ui.setDifficulty = function(difficulty: string): void {
     const savedConfig = getSafeStorage('minesweeper-config') || '{}';
@@ -218,22 +247,29 @@ function initGame(): void {
     ui.updateDifficultyCheckmarks(difficulty);
   };
   
-  // Установка custom конфига
+  // Re-wire setDifficultyFromConfig
   const originalSetDifficultyFromConfig = ui.setDifficultyFromConfig.bind(ui);
   ui.setDifficultyFromConfig = function(config: GameConfig): void {
     const standard = getStandardDifficulty(config);
     if (standard) {
       ui.setDifficulty(standard);
     } else {
-      // Для custom режима обновляем только доску
       ui.boardWidth = config.width;
       ui.boardHeight = config.height;
-      game.setConfig(config);
+      ui.game.setConfig(config);
       ui.updateAll();
       ui.updateDifficultyCheckmarks('custom');
     }
   };
   
+  // Global key handler for F2 (reset)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F2') {
+      e.preventDefault();
+      ui.resetGame();
+    }
+  });
+
   console.log('Сапёр инициализирован');
 }
 
