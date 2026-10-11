@@ -14,11 +14,13 @@ import {
   type StandardDifficulty
 } from './Game.ts';
 import { formatLedNumber, getStandardDifficulty } from './utils.ts';
+import type { ThemeController } from './theme.ts';
 
 type TouchMode = 'question' | 'flag' | 'click';
 type FaceState = 'normal' | 'surprised' | 'dead' | 'won' | 'pause' | 'resume';
 type Difficulty = StandardDifficulty | 'custom';
 type MenuAction = 'new' | 'difficulty' | 'custom' | 'theme' | 'controls' | 'about';
+type ThemeMenuDependency = Pick<ThemeController, 'cycle' | 'getMenuLabel'>;
 
 const ZOOM_LEVELS = [75, 100, 125, 150, 175, 200] as const;
 type ZoomLevel = typeof ZOOM_LEVELS[number];
@@ -44,7 +46,7 @@ interface UIElements {
   touchActionPanel: HTMLDivElement;
   touchModeButtons: Map<TouchMode, HTMLButtonElement>;
   menuDropdowns: Partial<Record<'game' | 'help', HTMLDivElement>>;
-  themeCheckbox: HTMLDivElement | null;
+  themeMenuItem: HTMLDivElement | null;
   difficultyCheckmarks: Partial<Record<Difficulty, HTMLDivElement>>;
 }
 
@@ -56,7 +58,6 @@ interface MenuActionItem {
   shortcut?: string;
   difficulty?: GameConfig;
   isDifficulty?: boolean;
-  checkbox?: boolean;
 }
 
 type GameMenuItem = MenuActionItem | { type: 'separator' };
@@ -82,6 +83,7 @@ function getCellCoordinates(cell: HTMLElement): Coordinate {
 
 export class UI {
   game: Minesweeper;
+  themeController: ThemeMenuDependency | undefined;
   touchMode: TouchMode;
   faceState: FaceState;
   boardWidth: number;
@@ -99,8 +101,9 @@ export class UI {
   timerInterval: number | null;
   uiUpdateValue: number | null;
 
-  constructor(game: Minesweeper) {
+  constructor(game: Minesweeper, themeController?: ThemeMenuDependency) {
     this.game = game;
+    this.themeController = themeController;
     this.touchMode = 'click';
     this.faceState = 'normal';
     this.boardWidth = game.width;
@@ -133,7 +136,7 @@ export class UI {
       touchActionPanel: null,
       touchModeButtons: new Map(),
       menuDropdowns: {},
-      themeCheckbox: null,
+      themeMenuItem: null,
       difficultyCheckmarks: {}
     } as unknown as UIElements;
 
@@ -148,7 +151,6 @@ export class UI {
   init(): void {
     this.createDOM();
     this.setupEventListeners();
-    this.applyTheme();
     this.startUIUpdate();
   }
 
@@ -315,7 +317,7 @@ export class UI {
       { label: 'Профессионал', action: 'difficulty', value: 'expert', difficulty: DIFFICULTY.EXPERT, menuId: 'menu-game-dropdown' },
       { label: 'Особый...', action: 'custom', value: 'custom', isDifficulty: true, menuId: 'menu-game-dropdown' },
       { type: 'separator' },
-      { label: 'Тёмная тема', action: 'theme', checkbox: true, menuId: 'menu-game-dropdown' }
+      { label: 'Тема: система', action: 'theme', menuId: 'menu-game-dropdown' }
     ];
 
     for (const item of gameItems) {
@@ -335,15 +337,17 @@ export class UI {
       el.dataset.value = item.value || '';
       el.dataset.menuId = item.menuId;
 
-      if (item.checkbox) {
-        el.classList.add('has-checkbox');
-        this.element.themeCheckbox = el;
-      } else if ((item.difficulty || item.isDifficulty) && item.value) {
+      if ((item.difficulty || item.isDifficulty) && item.value) {
         el.classList.add('has-checkmark');
         this.element.difficultyCheckmarks[item.value] = el;
         if (item.value === 'beginner') {
           el.classList.add('checked');
         }
+      } else if (item.action === 'theme') {
+        // Store theme menu item reference
+        this.element.themeMenuItem = el;
+        // Set initial label from controller if available
+        this.updateThemeMenuItemLabel();
       } else {
         if (item.shortcut) {
           const shortcut = document.createElement('span');
@@ -710,8 +714,12 @@ export class UI {
         break;
 
       case 'theme':
-        const isChecked = item.classList.contains('checked');
-        this.toggleTheme(!isChecked);
+        // Close all menus first (already done at start of function)
+        // Cycle theme and update label if controller is available
+        this.themeController?.cycle();
+        if (this.element.themeMenuItem && this.themeController) {
+          this.element.themeMenuItem.textContent = this.themeController.getMenuLabel();
+        }
         break;
 
       case 'controls':
@@ -1677,41 +1685,12 @@ export class UI {
   }
 
   /**
-   * Переключение темы
+   * Update theme menu item label from controller
+   * Safe no-op if controller not provided
    */
-  toggleTheme(isDark: boolean): void {
-    try {
-      if (isDark) {
-        document.documentElement.classList.add('dark-theme');
-        localStorage.setItem('minesweeper-theme', 'dark');
-      } else {
-        document.documentElement.classList.remove('dark-theme');
-        localStorage.setItem('minesweeper-theme', 'light');
-      }
-    } catch (e) {
-      // Ignore localStorage errors
-    }
-
-    // Обновить чекбокс в меню
-    if (this.element.themeCheckbox) {
-      if (isDark) {
-        this.element.themeCheckbox.classList.add('checked');
-      } else {
-        this.element.themeCheckbox.classList.remove('checked');
-      }
-    }
-  }
-
-  /**
-   * Применение сохранённой темы
-   */
-  applyTheme(): void {
-    try {
-      const savedTheme = localStorage.getItem('minesweeper-theme');
-      const isDark = savedTheme === 'dark';
-      this.toggleTheme(isDark);
-    } catch (e) {
-      // Ignore localStorage errors
+  updateThemeMenuItemLabel(): void {
+    if (this.element.themeMenuItem && this.themeController) {
+      this.element.themeMenuItem.textContent = this.themeController.getMenuLabel();
     }
   }
 

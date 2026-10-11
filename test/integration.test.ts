@@ -12,7 +12,8 @@ import {
   type Coordinate,
   type StandardDifficulty
 } from '../src/Game.ts';
-import type { UI as UIInstance } from '../src/UI.ts';
+import type { UI as UIInstance, UI } from '../src/UI.ts';
+import type { ThemeController } from '../src/theme.ts';
 
 interface UIConstructor {
   prototype: UIInstance;
@@ -1577,33 +1578,119 @@ test('UI - handleDropdownClick custom action opens dialog', async () => {
   assert.strictEqual(openCustomDialogCalled, true, 'openCustomDialog should be called for custom action');
 });
 
-test('UI - handleDropdownClick theme action toggles theme from checked', async () => {
+// === TRI-STATE THEME INTEGRATION TESTS ===
+
+// ThemeMenuDependency for UI - minimal interface for theme menu behavior
+type ThemeMenuDependency = Pick<ThemeController, 'cycle' | 'getMenuLabel'>;
+
+// Structural fake that satisfies ThemeMenuDependency without as any
+function createThemeMenuFake(): ThemeMenuDependency {
+  let preference = 'system';
+  const labels: Record<string, string> = {
+    'system': 'Тема: система',
+    'light': 'Тема: светлая',
+    'dark': 'Тема: тёмная'
+  };
+  return {
+    cycle() {
+      preference = preference === 'system' ? 'light' : preference === 'light' ? 'dark' : 'system';
+    },
+    getMenuLabel() {
+      return labels[preference];
+    }
+  };
+}
+
+// Test: createMenuDropdowns sets initial label from controller (not hardcoded)
+test('UI - tri-state theme action: createMenuDropdowns reads initial label from controller', async () => {
   const { UI } = await import('../src/UI.ts');
 
   const ui = createBareUI(UI);
+  const fake = createThemeMenuFake();
+  ui.themeController = fake;
 
-  // Mock methods with spies
-  let closeAllMenusCalled = false;
-  let toggleThemeCalled = false;
-  let toggleThemeArg: boolean | null = null;
+  // Mock just the themeMenuItem element
+  const mockItem = { textContent: '', classList: { add: () => {}, remove: () => {}, contains: () => false } } as unknown as HTMLDivElement;
+  ui.element = createPartialElements({ themeMenuItem: mockItem }) as UIInstance['element'];
 
-  ui.closeAllMenus = () => { closeAllMenusCalled = true; };
-  ui.toggleTheme = (isDark) => { toggleThemeCalled = true; toggleThemeArg = isDark; };
+  // Call updateThemeMenuItemLabel which is what createMenuDropdowns invokes
+  ui.updateThemeMenuItemLabel();
 
-  // Mock item for 'theme' action - already checked (dark theme active)
-  const mockItem = createMenuItem({ action: 'theme', checked: true });
+  // Verify label set from controller (not hardcoded)
+  assert.ok(ui.element.themeMenuItem);
+  assert.strictEqual(ui.element.themeMenuItem.textContent, 'Тема: система', 'initial label from getMenuLabel()');
+});
 
-  const mockEvent = createMouseEvent(mockItem);
+// Test: handleDropdownClick calls cycle once and updates label
+test('UI - tri-state theme action: handleDropdownClick calls cycle once and refreshes label', async () => {
+  const { UI } = await import('../src/UI.ts');
 
-  // Call handleDropdownClick
-  ui.handleDropdownClick(mockEvent);
+  const ui = createBareUI(UI);
+  const fake = createThemeMenuFake();
+  ui.themeController = fake;
 
-  // Verify closeAllMenus called first
-  assert.strictEqual(closeAllMenusCalled, true, 'closeAllMenus should be called first');
+  let cycleCount = 0;
+  const originalCycle = fake.cycle;
+  fake.cycle = () => { cycleCount++; originalCycle.call(fake); };
 
-  // Verify toggleTheme was called with !isChecked (false since checked)
-  assert.strictEqual(toggleThemeCalled, true, 'toggleTheme should be called for theme action');
-  assert.strictEqual(toggleThemeArg, false, 'toggleTheme should be called with false (disable dark theme when already checked)');
+  const mockItem = { textContent: '', classList: { add: () => {}, remove: () => {}, contains: () => false } } as unknown as HTMLDivElement;
+  ui.element = createPartialElements({ themeMenuItem: mockItem }) as UIInstance['element'];
+  assert.ok(ui.element.themeMenuItem);
+
+  ui.element.themeMenuItem.textContent = fake.getMenuLabel();
+  assert.strictEqual(ui.element.themeMenuItem.textContent, 'Тема: система');
+
+  ui.handleDropdownClick(createMouseEvent({ dataset: { action: 'theme' }, closest: () => ({ dataset: { action: 'theme' } }) } as unknown as HTMLDivElement));
+
+  assert.strictEqual(cycleCount, 1, 'cycle called exactly once');
+  assert.strictEqual(ui.element.themeMenuItem!.textContent, 'Тема: светлая', 'label refreshed after cycle');
+});
+
+// Test: closeAllMenus called before cycle
+test('UI - tri-state theme action: closeAllMenus order trace', async () => {
+  const { UI } = await import('../src/UI.ts');
+
+  const ui = createBareUI(UI);
+  const fake = createThemeMenuFake();
+  ui.themeController = fake;
+
+  const order: string[] = [];
+  ui.closeAllMenus = () => order.push('close');
+  fake.cycle = () => order.push('cycle');
+
+  ui.element = createPartialElements({ themeMenuItem: { textContent: '', classList: { add: () => {}, remove: () => {}, contains: () => false } } as unknown as HTMLDivElement }) as UIInstance['element'];
+
+  ui.handleDropdownClick(createMouseEvent({ dataset: { action: 'theme' }, closest: () => ({ dataset: { action: 'theme' } }) } as unknown as HTMLDivElement));
+
+  assert.deepStrictEqual(order, ['close', 'cycle'], 'closeAllMenus before cycle');
+});
+
+// Test: checked state irrelevant
+test('UI - tri-state theme action: checked state irrelevant', async () => {
+  const { UI } = await import('../src/UI.ts');
+
+  const ui = createBareUI(UI);
+  const fake = createThemeMenuFake();
+  ui.themeController = fake;
+
+  let cycleCount = 0;
+  fake.cycle = () => { cycleCount++; };
+
+  ui.element = createPartialElements({ themeMenuItem: { textContent: '', classList: { add: () => {}, remove: () => {}, contains: () => false } } as unknown as HTMLDivElement }) as UIInstance['element'];
+
+  for (const checked of [true, false, undefined] as const) {
+    const item = createMenuItem({ action: 'theme', checked });
+    ui.handleDropdownClick(createMouseEvent(item));
+  }
+  assert.strictEqual(cycleCount, 3, 'cycle called regardless of checked state');
+});
+
+// Test: old methods removed
+test('UI - tri-state theme action: old methods removed', async () => {
+  const { UI } = await import('../src/UI.ts');
+
+  assert.strictEqual('toggleTheme' in UI.prototype, false, 'toggleTheme removed');
+  assert.strictEqual('applyTheme' in UI.prototype, false, 'applyTheme removed');
 });
 
 test('UI - handleDropdownClick controls action opens dialog', async () => {
