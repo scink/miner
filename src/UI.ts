@@ -37,6 +37,7 @@ interface UIElements {
   menubar: HTMLDivElement;
   boardFrame: HTMLDivElement;
   board: HTMLDivElement;
+  boardScroll: HTMLDivElement;
   pauseOverlay: HTMLDivElement;
   cells: Map<string, HTMLButtonElement>;
   faceBtn: HTMLButtonElement;
@@ -127,6 +128,7 @@ export class UI {
       menubar: null,
       boardFrame: null,
       board: null,
+      boardScroll: null,
       pauseOverlay: null,
       cells: new Map(),
       faceBtn: null,
@@ -143,6 +145,23 @@ export class UI {
     this.timerInterval = null;
     this.uiUpdateValue = null;
     this.init();
+  }
+
+  /**
+   * Helper to assemble board area structure
+   * Appends controls, boardScroll(boardFrame), and touchControls in order to boardArea
+   */
+  assembleBoardArea(
+    boardArea: HTMLDivElement,
+    controls: HTMLDivElement,
+    boardScroll: HTMLDivElement,
+    boardFrame: HTMLDivElement,
+    touchControls: HTMLDivElement
+  ): void {
+    boardArea.appendChild(controls);
+    boardScroll.appendChild(boardFrame);
+    boardArea.appendChild(boardScroll);
+    boardArea.appendChild(touchControls);
   }
 
   /**
@@ -196,11 +215,11 @@ export class UI {
     this.createMenu();
     this.element.window.appendChild(this.element.menubar);
 
-    // Board area
+    // Board area - flex column container
     const boardArea = document.createElement('div');
     boardArea.className = 'board-area';
 
-    // Controls
+    // Controls (counters/face) - outside board-scroll
     const controls = document.createElement('div');
     controls.className = 'controls';
 
@@ -213,9 +232,13 @@ export class UI {
     controls.appendChild(this.element.mineCountDisplay);
     controls.appendChild(this.element.faceBtn);
     controls.appendChild(this.element.timerDisplay);
-    boardArea.appendChild(controls);
 
-    // Game board and pause layer
+    // Board scroll viewport - owns scrolling for mine grid only
+    const boardScroll = document.createElement('div');
+    boardScroll.className = 'board-scroll';
+    this.element.boardScroll = boardScroll;
+
+    // Game board and pause layer (inside board-scroll)
     this.element.boardFrame = document.createElement('div');
     this.element.boardFrame.className = 'board-frame';
 
@@ -241,9 +264,8 @@ export class UI {
 
     this.element.boardFrame.appendChild(this.element.board);
     this.element.boardFrame.appendChild(this.element.pauseOverlay);
-    boardArea.appendChild(this.element.boardFrame);
 
-    // Touch controls
+    // Touch controls - outside board-scroll
     this.element.touchActionPanel = document.createElement('div');
     this.element.touchActionPanel.className = 'touch-controls';
     this.element.touchActionPanel.setAttribute('role', 'group');
@@ -260,7 +282,9 @@ export class UI {
       this.element.touchModeButtons.set(action.mode, button);
     }
     this.updateTouchModeUI();
-    boardArea.appendChild(this.element.touchActionPanel);
+
+    // Assemble boardArea: controls, boardScroll(boardFrame), touchControls
+    this.assembleBoardArea(boardArea, controls, boardScroll, this.element.boardFrame, this.element.touchActionPanel);
 
     this.updateGameStateUI();
 
@@ -597,10 +621,14 @@ export class UI {
     const currentIndex = ZOOM_LEVELS.indexOf(this.zoomLevel);
     const lowerLevel = ZOOM_LEVELS[currentIndex - 1];
     const higherLevel = ZOOM_LEVELS[currentIndex + 1];
-    const zoomFactor = String(this.zoomLevel / 100);
+    const zoomFactor = this.zoomLevel / 100;
+    const inverseViewportConstraint = String(100 / zoomFactor) + '%';
 
-    this.element.window.style.setProperty('--game-zoom', zoomFactor);
+    this.element.window.style.setProperty('--game-zoom', String(zoomFactor));
     this.element.window.dataset.zoom = String(this.zoomLevel);
+    // Expose inverse viewport constraint as percentage for CSS max-width/max-height
+    // At zoom 200%, constraint is 50% (window size is 2x logical, so max-width: 50% fits viewport)
+    this.element.window.style.setProperty('--inverse-viewport-constraint', inverseViewportConstraint);
 
     this.element.zoomOutBtn.disabled = lowerLevel === undefined;
     this.element.zoomInBtn.disabled = higherLevel === undefined;

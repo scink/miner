@@ -87,7 +87,7 @@ test('Telegram SDK - official script appears before module script in index.html'
 });
 
 // Step 3: Test CSS safe-area layout
-test('safe-area - body uses min-height: 100dvh fallback plus --tg-viewport-stable-height', () => {
+test('safe-area - body uses height: 100dvh plus --tg-viewport-stable-height', () => {
   const cssPath = path.join(process.cwd(), 'src/styles.css');
   const cssContent = fs.readFileSync(cssPath, 'utf-8');
   
@@ -97,10 +97,10 @@ test('safe-area - body uses min-height: 100dvh fallback plus --tg-viewport-stabl
   
   const bodyRule = bodyMatch[0];
   
-  // Check for min-height: 100dvh
+  // Check for height: 100dvh
   assert.ok(
-    bodyRule.includes('min-height: 100dvh'),
-    'body should use min-height: 100dvh'
+    bodyRule.includes('height: 100dvh'),
+    'body should use height: 100dvh'
   );
   
   // Check for Telegram viewport variable
@@ -163,7 +163,7 @@ test('safe-area - narrow/coarse rules retain safe-area padding', () => {
   );
 });
 
-test('safe-area - body/board overflow and .modal-body { overflow-y: auto; } remain available', () => {
+test('safe-area - body has overflow:hidden, board-area/scroll own scrolling', () => {
   const cssPath = path.join(process.cwd(), 'src/styles.css');
   const cssContent = fs.readFileSync(cssPath, 'utf-8');
   
@@ -172,14 +172,18 @@ test('safe-area - body/board overflow and .modal-body { overflow-y: auto; } rema
   assert.ok(bodyMatch, 'body rule should exist');
   const bodyRule = bodyMatch[0];
   assert.ok(
-    bodyRule.includes('overflow: auto'),
-    'body should have overflow: auto for zoom scrolling'
+    bodyRule.includes('overflow: hidden'),
+    'body must have overflow: hidden (no body scrolling)'
   );
   
-  // Check that board-area has overflow: auto
-  const boardAreaMatch = cssContent.match(/\.board-area\s*\{[^}]*overflow:\s*auto[^}]*\}/s);
-  assert.ok(boardAreaMatch, '.board-area should have overflow: auto');
+  // Check that board-area has overflow: hidden (scrolling delegated to board-scroll)
+  const boardAreaMatch = cssContent.match(/\.board-area\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
+  assert.ok(boardAreaMatch, '.board-area must have overflow: hidden');
   
+  // Check that board-scroll has overflow: auto (owns scrolling)
+  const boardScrollMatch = cssContent.match(/\.board-scroll\s*\{[^}]*overflow:\s*auto[^}]*\}/s);
+  assert.ok(boardScrollMatch, '.board-scroll must have overflow: auto (owns scrolling)');
+
   // Check that .modal-body has overflow-y: auto
   const modalBodyMatch = cssContent.match(/\.modal-body\s*\{[^}]*overflow-y:\s*auto[^}]*\}/s);
   assert.ok(modalBodyMatch, '.modal-body should have overflow-y: auto');

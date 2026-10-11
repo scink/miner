@@ -110,19 +110,24 @@ body {
   background-color: var(--desktop-bg);
   color: var(--text-color);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  /* Use 100dvh as the viewport unit, with Telegram stable viewport variable as fallback */
-  min-height: 100dvh;
-  min-height: var(--tg-viewport-stable-height, 100dvh);
-  /* Allow scrolling at zoom 200% */
-  overflow: auto;
+  /* Definite safe-area viewport - no body scrolling */
+  height: 100dvh;
+  height: var(--tg-viewport-stable-height, 100dvh);
+  overflow: hidden;
   display: flex;
   justify-content: safe center;
   align-items: flex-start;
 }
 
-/* Main window container */
+/* Main window container - flex column to constrain children */
 .window {
   --game-zoom: 1;
+  --inverse-viewport-constraint: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background-color: var(--bg-gray);
   color: var(--text-color);
   border-top: var(--window-border) var(--window-border-light);
@@ -131,12 +136,14 @@ body {
   border-bottom: var(--window-border) var(--dark-shadow);
   padding: 2px;
   box-shadow: 4px 4px 0 var(--dark-shadow);
-  max-width: 100%;
+  max-width: var(--inverse-viewport-constraint);
+  max-height: var(--inverse-viewport-constraint);
   zoom: var(--game-zoom);
 }
 
-/* Title bar */
+/* Title bar - fixed height, non-scrolling */
 .title-bar {
+  flex: 0 0 auto;
   background-color: #000080;
   color: white;
   padding: 4px 8px;
@@ -214,6 +221,7 @@ body {
   color: var(--text-color);
   border-bottom: 1px solid var(--dark-gray);
   margin-bottom: 4px;
+  flex: 0 0 auto;
 }
 
 .menu-item {
@@ -288,16 +296,29 @@ body {
   margin: 2px 0;
 }
 
-/* Board area - Win95 style */
+/* Board area - Win95 style, flex column container for controls and board-scroll */
 .board-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
   margin: 4px;
-  overflow: auto;
   border-top: 2px solid var(--dark-shadow);
   border-left: 2px solid var(--dark-shadow);
   border-right: 2px solid var(--light-gray);
   border-bottom: 2px solid var(--light-gray);
   padding: 4px;
   background-color: var(--bg-gray);
+}
+
+/* Board scroll viewport - owns scrolling for mine grid only */
+.board-scroll {
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 /* Controls - Win95 style */
@@ -682,6 +703,7 @@ body {
 /* Touch controls - hidden by default, shown only for touch devices */
 .touch-controls {
   display: none;
+  flex: 0 0 auto;
   gap: 8px;
   margin-top: 8px;
   align-items: center;

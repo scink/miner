@@ -2154,3 +2154,95 @@ test('CSS - Wrong-flag has flat cell with unified mine+diagonal-X sprite', async
   assert.ok(!notFlaggedBeforeContent.includes("rect x='4' y='2' width='8' height='2'"),
     'wrong-flag:not(.flagged)::before should NOT have rectangular blocks for X');
 });
+
+type FakeTreeElement = {
+  name: string;
+  children: FakeTreeElement[];
+  appendChild(child: FakeTreeElement): FakeTreeElement;
+};
+
+const makeNode = (name: string): FakeTreeElement => ({
+  name,
+  children: [],
+  appendChild(child: FakeTreeElement) { this.children.push(child); return child; }
+});
+
+test('DOM - assembleBoardArea appends controls, boardScroll(boardFrame), touchControls', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+
+  const boardArea = makeNode('board-area');
+  const controls = makeNode('controls');
+  const boardScroll = makeNode('board-scroll');
+  const boardFrame = makeNode('board-frame');
+  const touchControls = makeNode('touch-controls');
+
+  ui.assembleBoardArea(
+    boardArea as unknown as HTMLDivElement,
+    controls as unknown as HTMLDivElement,
+    boardScroll as unknown as HTMLDivElement,
+    boardFrame as unknown as HTMLDivElement,
+    touchControls as unknown as HTMLDivElement
+  );
+
+  assert.strictEqual(boardArea.children.length, 3);
+  assert.strictEqual(boardArea.children[0].name, 'controls');
+  assert.strictEqual(boardArea.children[1].name, 'board-scroll');
+  assert.strictEqual(boardArea.children[2].name, 'touch-controls');
+
+  assert.strictEqual(boardScroll.children.length, 1);
+  assert.strictEqual(boardScroll.children[0].name, 'board-frame');
+
+  assert.strictEqual(boardScroll.children.find(c => c.name === 'controls'), undefined, 'controls not in boardScroll');
+  assert.strictEqual(boardScroll.children.find(c => c.name === 'touch-controls'), undefined, 'touchControls not in boardScroll');
+});
+
+test('CSS - board-area/scroll scroll contract and window percentage constraint', async () => {
+  const fs = await import('node:fs');
+  const cssContent = fs.readFileSync(new URL('../src/styles.css', import.meta.url).pathname, 'utf8');
+
+  const boardAreaMatch = cssContent.match(/\.board-area\s*\{([^}]+)\}/s);
+  assert.ok(boardAreaMatch, '.board-area CSS rule should exist');
+  assert.ok(boardAreaMatch[1].includes('overflow: hidden;'), 'board-area must have overflow: hidden');
+  assert.ok(boardAreaMatch[1].includes('flex: 1 1 auto;'), 'board-area must have flex: 1 1 auto');
+
+  const boardScrollMatch = cssContent.match(/\.board-scroll\s*\{([^}]+)\}/s);
+  assert.ok(boardScrollMatch, '.board-scroll CSS rule should exist');
+  assert.ok(boardScrollMatch[1].includes('overflow: auto;'), 'board-scroll must have overflow: auto');
+
+  const windowMatch = cssContent.match(/\.window\s*\{([^}]+)\}/s);
+  assert.ok(windowMatch, '.window CSS rule should exist');
+  assert.ok(windowMatch[1].includes('--inverse-viewport-constraint: 100%;'), 'window must define inverse constraint');
+  assert.ok(windowMatch[1].includes('max-width: var(--inverse-viewport-constraint);'), 'window max-width uses constraint');
+  assert.ok(windowMatch[1].includes('max-height: var(--inverse-viewport-constraint);'), 'window max-height uses constraint');
+});
+
+test('UI - updateZoomUI sets --inverse-viewport-constraint as percentage at all zoom levels', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  ui.game = new Minesweeper({ width: 9, height: 9, mines: 10 });
+
+  const setPropertyCalls: { name: string; value: string }[] = [];
+  const windowEl = {
+    dataset: {},
+    style: { setProperty: (n: string, v: string) => setPropertyCalls.push({ name: n, value: v }) }
+  } as unknown as HTMLDivElement;
+
+  ui.element = createPartialElements({
+    window: windowEl,
+    zoomOutBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement,
+    zoomResetBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement,
+    zoomInBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement
+  });
+
+  const zoomLevels: (75 | 100 | 125 | 150 | 175 | 200)[] = [75, 100, 125, 150, 175, 200];
+  for (const level of zoomLevels) {
+    setPropertyCalls.length = 0;
+    ui.zoomLevel = level;
+    ui.updateZoomUI();
+
+    const inverseConstraint = setPropertyCalls.find(c => c.name === '--inverse-viewport-constraint');
+    assert.ok(inverseConstraint, `Level ${level}% must set --inverse-viewport-constraint`);
+    assert.strictEqual(inverseConstraint.value, String(100 / (level / 100)) + '%');
+  }
+});
