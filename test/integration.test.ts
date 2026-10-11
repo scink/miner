@@ -24,6 +24,10 @@ interface MenuTracker {
   isShown(): boolean;
 }
 
+interface FakeButton extends HTMLButtonElement {
+  clickListeners: (() => void)[];
+}
+
 function createBareUI(UIClass: UIConstructor): UIInstance {
   return Object.create(UIClass.prototype) as UIInstance;
 }
@@ -860,6 +864,122 @@ test('UI - Touch action buttons keep one persistent accessible selection', async
   assert.strictEqual(fixture.attributes.get('flag')?.get('aria-pressed'), 'false');
 });
 
+test('UI - getTouchActionSvg returns valid SVG icons for all modes', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  const questionSvg = ui.getTouchActionSvg('question');
+  const flagSvg = ui.getTouchActionSvg('flag');
+  const clickSvg = ui.getTouchActionSvg('click');
+  assert.ok(questionSvg.length > 0 && flagSvg.length > 0 && clickSvg.length > 0, 'All SVGs should be non-empty');
+  assert.ok(questionSvg.includes('shape-rendering="crispEdges"'), 'Question SVG should have crispEdges');
+  assert.ok(flagSvg.includes('shape-rendering="crispEdges"'), 'Flag SVG should have crispEdges');
+  assert.ok(clickSvg.includes('shape-rendering="crispEdges"'), 'Click SVG should have crispEdges');
+  assert.ok(questionSvg.includes('aria-hidden="true"') && questionSvg.includes('focusable="false"'), 'Question SVG should have accessibility attributes');
+  assert.ok(flagSvg.includes('aria-hidden="true"') && flagSvg.includes('focusable="false"'), 'Flag SVG should have accessibility attributes');
+  assert.ok(clickSvg.includes('aria-hidden="true"') && clickSvg.includes('focusable="false"'), 'Click SVG should have accessibility attributes');
+  assert.notStrictEqual(questionSvg, flagSvg, 'SVGs should be distinct');
+  assert.notStrictEqual(flagSvg, clickSvg, 'SVGs should be distinct');
+  assert.notStrictEqual(questionSvg, clickSvg, 'SVGs should be distinct');
+
+  // Question SVG: pixel-style question mark with rect geometry
+  assert.ok(questionSvg.includes('<rect x="10" y="4" width="4" height="4" fill="black"'), 'Question SVG should have pixel question mark geometry');
+  assert.ok(questionSvg.includes('<rect x="6" y="8" width="12" height="2" fill="black"'), 'Question SVG should have question mark bar');
+  assert.ok(questionSvg.includes('<rect x="10" y="2" width="2" height="2" fill="black"'), 'Question SVG should have pixel dots');
+
+  // Flag SVG: classic Minesweeper/Win95-style flag with red cloth, black staff
+  assert.ok(flagSvg.includes('<rect x="9" y="2" width="2" height="20" fill="black"'), 'Flag SVG should have black staff');
+  assert.ok(flagSvg.includes('<rect x="8" y="22" width="4" height="2" fill="black"'), 'Flag SVG should have black base');
+  assert.ok(flagSvg.includes('<path d="M11 3 L19 7 L11 11 Z" fill="red"'), 'Flag SVG should have red cloth path');
+
+  // Click SVG: pixel-style cursor/click icon with circular base
+  assert.ok(clickSvg.includes('<path d="M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z" fill="black"'), 'Click SVG should have pixel cursor path');
+  assert.ok(clickSvg.includes('<circle cx="12" cy="14" r="3" fill="black"'), 'Click SVG should have circular base');
+});
+
+test('CSS - Touch action button has exact square dimensions and flex properties', async () => {
+  const fs = await import('node:fs');
+  const cssContent = fs.readFileSync(new URL('../src/styles.css', import.meta.url).pathname, 'utf8');
+  const touchButtonRule = cssContent.match(/\.touch-action-button\s*\{([^}]+)\}/s);
+  assert.ok(touchButtonRule, '.touch-action-button CSS rule should exist');
+  const ruleContent = touchButtonRule[1];
+  assert.ok(ruleContent.includes('width: 44px;'), 'Should have width: 44px');
+  assert.ok(ruleContent.includes('height: 44px;'), 'Should have height: 44px');
+  assert.ok(ruleContent.includes('flex: 0 0 auto;'), 'Should have flex: 0 0 auto');
+  assert.ok(!ruleContent.includes('min-width: 60px'), 'Should NOT have min-width: 60px');
+  assert.ok(!ruleContent.includes('min-height'), 'Should NOT have min-height');
+  const svgFlexRule = cssContent.match(/\.touch-action-button svg\s*\{([^}]+)\}/s);
+  assert.ok(svgFlexRule, '.touch-action-button svg CSS rule should exist');
+  assert.ok(svgFlexRule[1].includes('flex: 0 0 auto;'), 'SVG child should have flex: 0 0 auto');
+});
+
+function makeFakeButton(): HTMLButtonElement {
+  const attrs: Record<string, string> = {};
+  const btn = {
+    type: '',
+    className: '',
+    dataset: { touchMode: '' },
+    innerHTML: '',
+    textContent: '',
+    clickListeners: [] as (() => void)[],
+    setAttribute: (name: string, value: string) => { attrs[name] = value; },
+    getAttribute: (name: string) => attrs[name] ?? null,
+    hasAttribute: (name: string) => name in attrs,
+    addEventListener: (event: string, listener: () => void) => {
+      if (event === 'click') (btn as FakeButton).clickListeners.push(listener);
+    },
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+    append: () => {},
+  } as unknown as HTMLButtonElement;
+  return btn;
+}
+
+test('UI - createTouchActionButton creates an icon-only accessible button', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  const originalDocument = global.document;
+
+  try {
+    for (const mode of ['question', 'flag', 'click'] as const) {
+      const label = mode === 'question' ? 'Вопрос' : mode === 'flag' ? 'Флаг' : 'Клик';
+      const expectedSvg = ui.getTouchActionSvg(mode);
+
+      global.document = {
+        createElement: (tagName: string) => {
+          if (tagName === 'button') return makeFakeButton();
+          return {
+            className: '', dataset: {}, attributes: {}, style: {},
+            setAttribute: () => {}, getAttribute: () => null, hasAttribute: () => false,
+            append: () => {}, appendChild: () => {}, removeChild: () => {},
+            addEventListener: () => {}, removeEventListener: () => {},
+            querySelector: () => null, querySelectorAll: () => [],
+          } as unknown as HTMLElement;
+        },
+      } as unknown as Document;
+
+      const button = ui.createTouchActionButton(mode, label) as FakeButton;
+
+      assert.strictEqual(button.getAttribute('title'), `${label}: действие при касании`, `Title exact for ${mode}`);
+      assert.strictEqual(button.type, 'button', `type for ${mode}`);
+      assert.strictEqual(button.className, 'touch-action-button', `className for ${mode}`);
+      assert.strictEqual(button.dataset.touchMode, mode, `dataset for ${mode}`);
+      assert.strictEqual(button.getAttribute('aria-label'), `${label}: действие при касании`, `aria-label for ${mode}`);
+      assert.strictEqual(button.getAttribute('aria-pressed'), 'false', `aria-pressed for ${mode}`);
+      assert.strictEqual(button.innerHTML, expectedSvg, `innerHTML exact for ${mode}`);
+      assert.strictEqual(button.textContent, '', `textContent for ${mode}`);
+
+      const clickMode: { mode: string | null } = { mode: null };
+      ui.handleTouchModeClick = (m: string) => { clickMode.mode = m; };
+
+      assert.strictEqual(button.clickListeners.length, 1, `Exactly one click listener for ${mode}`);
+      button.clickListeners[0]();
+      assert.strictEqual(clickMode.mode, mode, `Correct mode dispatched for ${mode}`);
+    }
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
 test('UI - Touch marker actions repeat, replace, and persist through the game model', async () => {
   const { UI } = await import('../src/UI.ts');
   const game = createDeterministicGame(9, 9, 10, []);
@@ -939,8 +1059,9 @@ test('UI - Touch move and cancel discard the gesture without an action or long p
   ui.handleTouchAction = () => { actionCalls++; };
   ui.clearBoardPressing = () => {};
 
+  // touchstart must NOT preventDefault (native scroll can begin)
   ui.handleTouchStart(start.event);
-  assert.strictEqual(start.wasPrevented(), true);
+  assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT call preventDefault');
   ui.handleTouchMove(createTouchEvent(cell, 1).event);
   ui.handleTouchEnd(end.event);
   assert.strictEqual(actionCalls, 0, 'Moving must cancel the tap action');
@@ -1120,12 +1241,262 @@ test('UI - Touch gesture cleanup is robust on paused/no-cell paths', async () =>
   ui.handleTouchEnd(createTouchEvent(differentCell).event);
   assert.strictEqual(actionCalls, 0, 'No action should be called for different cell');
 
-  // Test 4: touchend on no-cell clears gesture even on paused path
+  // Test 4: touchstart does not arm gesture in PAUSED/WON/LOST
   assert.strictEqual(game.pause(), true);
   ui.handleTouchStart(start.event);
-  assert.ok(ui.touchGestureCell, 'Gesture cell should be set before touchend');
-  ui.handleTouchEnd(end.event);
-  assert.strictEqual(ui.touchGestureCell, null, 'Gesture cell should be cleared even on paused path');
+  assert.strictEqual(ui.touchGestureCell, null, 'PAUSED: no gesture set');
+  game.resume();
+  game.stopTimer();
+});
+
+// Helper: create tracked records with element, added set, removed set, and key
+interface TrackedRecord {
+  element: HTMLButtonElement;
+  added: Set<string>;
+  removed: Set<string>;
+  key: string;
+}
+
+function createTrackedRecord(n?: {x: number, y: number}): TrackedRecord {
+  const added = new Set<string>();
+  const removed = new Set<string>();
+  const classList = {
+    add: (...tokens: string[]) => tokens.forEach(token => added.add(token)),
+    remove: (...tokens: string[]) => tokens.forEach(token => removed.add(token)),
+    contains: (token: string) => added.has(token) && !removed.has(token)
+  } as DOMTokenList;
+  const key = n ? `${n.x},${n.y}` : '';
+
+  return {
+    element: { classList } as HTMLButtonElement,
+    added,
+    removed,
+    key
+  };
+}
+
+test('UI - Touch chord preview is mode-independent and chords once', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 3;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  const neighbors = game.getNeighbors(2, 2);
+  neighbors.forEach(n => {
+    if (n.x === 1 && n.y === 1) n.state = CELL_STATE.CLOSED;
+    else if (n.x === 1 && n.y === 2) n.state = CELL_STATE.FLAGGED;
+    else if (n.x === 1 && n.y === 3) n.state = CELL_STATE.QUESTIONED;
+    else if (n.x === 2 && n.y === 1) n.state = CELL_STATE.REVEALED;
+    else n.state = CELL_STATE.CLOSED;
+  });
+
+  const records: TrackedRecord[] = [];
+  for (const n of neighbors) {
+    const record = createTrackedRecord(n);
+    ui.element.cells.set(`${n.x},${n.y}`, record.element);
+    records.push(record);
+  }
+
+  const cell = createTouchCell(2, 2);
+
+  for (const mode of ['question', 'flag', 'click'] as const) {
+    const start = createTouchEvent(cell, 1);
+    const end = createTouchEvent(cell, 0);
+    const callOrder: string[] = [];
+    let chordCalled = false;
+
+    ui.touchMode = mode;
+    ui.handleCellChord = () => { chordCalled = true; callOrder.push('chord'); };
+    end.event.preventDefault = () => { callOrder.push('prevent'); };
+
+    ui.handleTouchStart(start.event);
+    assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT preventDefault');
+    for (const record of records) {
+      if (record.key === '1,1' || record.key === '1,3' || record.key === '3,1' || record.key === '2,3' || record.key === '3,2' || record.key === '3,3') {
+        assert.ok(record.added.has('pressing'), `${record.key} should get pressing`);
+      } else {
+        assert.ok(!record.added.has('pressing'), `${record.key} should NOT get pressing`);
+      }
+    }
+
+    ui.handleTouchEnd(end.event);
+    assert.ok(chordCalled, `chord should be called in ${mode}`);
+    assert.deepStrictEqual(callOrder, ['prevent', 'chord'], `preventDefault before chord in ${mode}`);
+    assert.strictEqual(ui.touchGestureCell, null, 'gesture cleared after touchend');
+    // Verify pressing was actually removed
+    for (const record of records) {
+      assert.ok(record.removed.has('pressing'), `${record.key} should have pressing removed`);
+    }
+
+    // Reset for next iteration
+    for (const record of records) {
+      record.added.clear();
+      record.removed.clear();
+    }
+  }
+  game.stopTimer();
+});
+
+test('UI - Touch move/cancel preserve native scroll and clear chord preview', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 2;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  const neighbors = game.getNeighbors(2, 2);
+  const records: TrackedRecord[] = [];
+  for (const n of neighbors) {
+    const record = createTrackedRecord(n);
+    ui.element.cells.set(`${n.x},${n.y}`, record.element);
+    records.push(record);
+  }
+
+  const cell = createTouchCell(2, 2);
+  let actionCalls = 0;
+  ui.handleTouchAction = () => { actionCalls++; };
+
+  // Test touchmove
+  const start1 = createTouchEvent(cell, 1);
+  const move1 = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start1.event);
+  assert.strictEqual(start1.wasPrevented(), false, 'touchstart must NOT preventDefault');
+  ui.handleTouchMove(move1.event);
+  assert.strictEqual(move1.wasPrevented(), false, 'touchmove must NOT preventDefault');
+  assert.strictEqual(actionCalls, 0, 'touchmove cancels action');
+  assert.strictEqual(ui.touchGestureCell, null, 'touchmove clears gesture');
+  assert.ok(records.every(r => r.removed.has('pressing')), 'touchmove clears pressing');
+
+  // Reset records for cancel test
+  for (const record of records) {
+    record.added.clear();
+    record.removed.clear();
+  }
+
+  // Test touchcancel
+  const start2 = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start2.event);
+  ui.handleTouchCancel(createTouchEvent(cell, 1).event);
+  assert.strictEqual(actionCalls, 0, 'touchcancel cancels action');
+  assert.strictEqual(ui.touchGestureCell, null, 'touchcancel clears gesture');
+  assert.ok(records.every(r => r.removed.has('pressing')), 'touchcancel clears pressing');
+
+  game.stopTimer();
+});
+
+test('UI - Touch gesture guards reject multi-touch and non-actionable states', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 2;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  game.board[1][1].state = CELL_STATE.CLOSED;
+  const record = createTrackedRecord({x: 1, y: 1});
+  ui.element.cells.set('1,1', record.element);
+
+  const cell = createTouchCell(2, 2);
+  ui.touchGestureCell = { x: 2, y: 2, element: cell };
+  record.element.classList.add('pressing');
+
+  const noClosestElement = {
+    closest: () => null, dataset: {}, classList: { add: () => {}, remove: () => {} }
+  } as unknown as HTMLElement;
+  const multiEvent = {
+    target: noClosestElement, touches: Array.from({ length: 2 }, () => ({} as Touch)),
+    preventDefault: () => {}
+  } as unknown as TouchEvent;
+
+  let multiPrevented = false;
+  multiEvent.preventDefault = () => { multiPrevented = true; };
+
+  ui.handleTouchStart(multiEvent);
+  assert.strictEqual(ui.touchGestureCell, null, 'multi-touch clears gesture');
+  assert.ok(!multiPrevented, 'multi-touch must not call preventDefault');
+  assert.ok(!record.element.classList.contains('pressing'), 'multi-touch clears preview');
+
+  // Test PAUSED: no gesture set (not actionable)
+  assert.strictEqual(game.pause(), true);
+  game.state = STATE.PAUSED;
+  const start = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT preventDefault');
+  assert.strictEqual(ui.touchGestureCell, null, 'PAUSED: no gesture set');
+  game.resume();
+
+  // Test WON/LOST: no gesture set
+  game.state = STATE.WON;
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(ui.touchGestureCell, null, 'WON: no gesture set');
+
+  game.state = STATE.LOST;
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(ui.touchGestureCell, null, 'LOST: no gesture set');
+
+  // Test CLOSED cell: one-finger start/end should work
+  game.state = STATE.RUNNING;
+  game.board[2][2].state = CELL_STATE.CLOSED;
+
+  for (const mode of ['flag', 'question', 'click'] as const) {
+    ui.touchMode = mode;
+    const actionStart = createTouchEvent(cell, 1);
+    const actionEnd = createTouchEvent(cell, 0);
+    let endPrevented = false;
+    let actionCalled = false;
+    let actionCoords: Coordinate | null = null;
+
+    ui.handleTouchAction = (x: number, y: number) => {
+      actionCalled = true;
+      actionCoords = { x, y };
+    };
+    actionEnd.event.preventDefault = () => { endPrevented = true; };
+
+    ui.handleTouchStart(actionStart.event);
+    ui.handleTouchEnd(actionEnd.event);
+
+    assert.strictEqual(endPrevented, true, `closed cell in ${mode} mode: end should preventDefault`);
+    assert.ok(actionCalled, `closed cell in ${mode} mode: handleTouchAction should be called`);
+    assert.deepStrictEqual(actionCoords, { x: 2, y: 2 }, `closed cell in ${mode} mode: correct coords`);
+  }
+
+  // Test revealed zero: should NOT chord, NOT action, and NOT prevent
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.board[2][2].neighbors = 0;
+
+  const startZero = createTouchEvent(cell, 1);
+  const endZero = createTouchEvent(cell, 0);
+  let zeroChordCalled = false;
+  let zeroActionCalled = false;
+  let zeroPrevented = false;
+
+  ui.handleCellChord = () => { zeroChordCalled = true; };
+  ui.handleTouchAction = () => { zeroActionCalled = true; };
+  endZero.event.preventDefault = () => { zeroPrevented = true; };
+
+  ui.handleTouchStart(startZero.event);
+  ui.handleTouchEnd(endZero.event);
+
+  assert.strictEqual(zeroPrevented, false, 'revealed zero: end should NOT preventDefault');
+  assert.strictEqual(zeroChordCalled, false, 'revealed zero: should NOT chord');
+  assert.strictEqual(zeroActionCalled, false, 'revealed zero: should NOT call handleTouchAction');
+
+  game.stopTimer();
 });
 
 test('UI - resetGame calls updateCounters (regression)', async () => {
@@ -2033,4 +2404,106 @@ test('CSS - Wrong-flag has flat cell with unified mine+diagonal-X sprite', async
   // Must NOT have rectangular blocks for X
   assert.ok(!notFlaggedBeforeContent.includes("rect x='4' y='2' width='8' height='2'"),
     'wrong-flag:not(.flagged)::before should NOT have rectangular blocks for X');
+});
+
+type FakeTreeElement = {
+  name: string;
+  children: FakeTreeElement[];
+  appendChild(child: FakeTreeElement): FakeTreeElement;
+};
+
+const makeNode = (name: string): FakeTreeElement => ({
+  name,
+  children: [],
+  appendChild(child: FakeTreeElement) { this.children.push(child); return child; }
+});
+
+test('DOM - assembleBoardArea appends controls, boardScroll(boardFrame), touchControls', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+
+  const boardArea = makeNode('board-area');
+  const controls = makeNode('controls');
+  const boardScroll = makeNode('board-scroll');
+  const boardFrame = makeNode('board-frame');
+  const touchControls = makeNode('touch-controls');
+
+  ui.assembleBoardArea(
+    boardArea as unknown as HTMLDivElement,
+    controls as unknown as HTMLDivElement,
+    boardScroll as unknown as HTMLDivElement,
+    boardFrame as unknown as HTMLDivElement,
+    touchControls as unknown as HTMLDivElement
+  );
+
+  assert.strictEqual(boardArea.children.length, 3);
+  assert.strictEqual(boardArea.children[0].name, 'controls');
+  assert.strictEqual(boardArea.children[1].name, 'board-scroll');
+  assert.strictEqual(boardArea.children[2].name, 'touch-controls');
+
+  assert.strictEqual(boardScroll.children.length, 1);
+  assert.strictEqual(boardScroll.children[0].name, 'board-frame');
+
+  assert.strictEqual(boardScroll.children.find(c => c.name === 'controls'), undefined, 'controls not in boardScroll');
+  assert.strictEqual(boardScroll.children.find(c => c.name === 'touch-controls'), undefined, 'touchControls not in boardScroll');
+});
+
+test('CSS - board-area/scroll scroll contract and window max-width/max-height 100%', async () => {
+  const fs = await import('node:fs');
+  const cssContent = fs.readFileSync(new URL('../src/styles.css', import.meta.url).pathname, 'utf8');
+
+  const boardAreaMatch = cssContent.match(/\.board-area\s*\{([^}]+)\}/s);
+  assert.ok(boardAreaMatch, '.board-area CSS rule should exist');
+  assert.ok(boardAreaMatch[1].includes('overflow: hidden;'), 'board-area must have overflow: hidden');
+  assert.ok(boardAreaMatch[1].includes('flex: 1 1 auto;'), 'board-area must have flex: 1 1 auto');
+
+  const boardScrollMatch = cssContent.match(/\.board-scroll\s*\{([^}]+)\}/s);
+  assert.ok(boardScrollMatch, '.board-scroll CSS rule should exist');
+  assert.ok(boardScrollMatch[1].includes('overflow: auto;'), 'board-scroll must have overflow: auto');
+
+  const windowMatch = cssContent.match(/\.window\s*\{([^}]+)\}/s);
+  assert.ok(windowMatch, '.window CSS rule should exist');
+  // After fix: window must use 100% directly, not --inverse-viewport-constraint
+  assert.ok(!windowMatch[1].includes('--inverse-viewport-constraint:'), 'window must NOT use --inverse-viewport-constraint');
+  assert.ok(windowMatch[1].includes('max-width: 100%;'), 'window max-width must be 100%');
+  assert.ok(windowMatch[1].includes('max-height: 100%;'), 'window max-height must be 100%');
+  assert.ok(windowMatch[1].includes('zoom: var(--game-zoom);'), 'window must use zoom from --game-zoom');
+});
+
+test('UI - updateZoomUI does NOT set --inverse-viewport-constraint and sets only --game-zoom', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  ui.game = new Minesweeper({ width: 9, height: 9, mines: 10 });
+
+  const setPropertyCalls: { name: string; value: string }[] = [];
+  const windowEl = {
+    dataset: {},
+    style: { setProperty: (n: string, v: string) => setPropertyCalls.push({ name: n, value: v }) }
+  } as unknown as HTMLDivElement;
+
+  ui.element = createPartialElements({
+    window: windowEl,
+    zoomOutBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement,
+    zoomResetBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement,
+    zoomInBtn: { disabled: false, textContent: '', title: '', setAttribute: () => {} } as unknown as HTMLButtonElement
+  });
+
+  const zoomLevels: (75 | 100 | 125 | 150 | 175 | 200)[] = [75, 100, 125, 150, 175, 200];
+  for (const level of zoomLevels) {
+    setPropertyCalls.length = 0;
+    ui.zoomLevel = level;
+    ui.updateZoomUI();
+
+    // After fix: --inverse-viewport-constraint must NOT be set
+    const inverseConstraint = setPropertyCalls.find(c => c.name === '--inverse-viewport-constraint');
+    assert.strictEqual(inverseConstraint, undefined, `Level ${level}% must NOT set --inverse-viewport-constraint`);
+
+    // Only --game-zoom should be set
+    const gameZoom = setPropertyCalls.find(c => c.name === '--game-zoom');
+    assert.ok(gameZoom, `Level ${level}% must set --game-zoom`);
+    assert.strictEqual(gameZoom.value, String(level / 100), `Level ${level}% --game-zoom value`);
+
+    // data-zoom should also be set
+    assert.strictEqual(windowEl.dataset.zoom, String(level), `Level ${level}% data-zoom value`);
+  }
 });
