@@ -10,14 +10,14 @@ import { join } from 'node:path';
 
 const CI_YAML_PATH = join(import.meta.dirname, '..', '.github', 'workflows', 'ci.yml');
 
-test('CI workflow runs on every push and pull request', () => {
+test('CI workflow runs on every push only', () => {
   const content = readFileSync(CI_YAML_PATH, 'utf8');
 
   // Assert unfiltered push trigger
   assert.match(content, /push:\s*$/m, 'push trigger should be present without filters');
 
-  // Assert pull_request trigger
-  assert.match(content, /pull_request:\s*$/m, 'pull_request trigger should be present');
+  // Assert NO pull_request trigger
+  assert.doesNotMatch(content, /pull_request:\s*$/m, 'pull_request trigger should NOT be present');
 
   // Assert actions/checkout@v6
   assert.match(content, /actions\/checkout@v6/, 'should use actions/checkout@v6');
