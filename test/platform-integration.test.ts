@@ -192,15 +192,61 @@ test('safe-area - body has overflow:hidden, board-area/scroll own scrolling', ()
 test('safe-area - no fixed pixel height added to .window', () => {
   const cssPath = path.join(process.cwd(), 'src/styles.css');
   const cssContent = fs.readFileSync(cssPath, 'utf-8');
-  
+
   // Find .window rule
   const windowMatch = cssContent.match(/\.window\s*\{[^}]+\}/s);
   assert.ok(windowMatch, '.window rule should exist');
-  
+
   const windowRule = windowMatch[0];
   // Should not contain height: followed by a pixel value
   assert.ok(
     !windowRule.match(/height\s*:\s*\d+px/),
     '.window should not have fixed pixel height'
   );
+});
+
+// ============== Viewport Size Management Tests ==============
+
+test('viewport size - viewportManager created before UI in main.ts source order', () => {
+  const mainPath = path.join(process.cwd(), 'src/main.ts');
+  const mainContent = fs.readFileSync(mainPath, 'utf-8');
+
+  const viewportIdx = mainContent.indexOf('viewportManager = createViewportSizeManager');
+  const uiIdx = mainContent.indexOf('const ui = initializePlatformUi');
+
+  assert.ok(viewportIdx >= 0, 'viewportManager assignment should exist in main.ts');
+  assert.ok(uiIdx >= 0, 'const ui = initializePlatformUi should exist in main.ts');
+  assert.ok(viewportIdx < uiIdx, 'viewportManager should be created before UI initialization');
+});
+
+// CSS contract test: body vars+fallbacks+overflow, window 100%/100%, board-scroll auto
+test('viewport size - CSS contract: body vars with fallbacks, window 100%/100%, board-scroll auto', () => {
+  const cssPath = path.join(process.cwd(), 'src/styles.css');
+  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+
+  // Body: --app-viewport-width/height with fallbacks, Telegram stable, overflow:hidden
+  const bodyMatch = cssContent.match(/body\s*\{[^}]+\}/s);
+  assert.ok(bodyMatch, 'body rule should exist');
+  const bodyRule = bodyMatch[0];
+  assert.ok(
+    bodyRule.includes('var(--app-viewport-width, 100vw)'),
+    'body should use var(--app-viewport-width, 100vw) for fallback'
+  );
+  assert.ok(
+    bodyRule.includes('var(--app-viewport-height, 100dvh)'),
+    'body should use var(--app-viewport-height, 100dvh) for fallback'
+  );
+  assert.ok(bodyRule.includes('--tg-viewport-stable-height'), 'body should preserve --tg-viewport-stable-height');
+  assert.ok(bodyRule.includes('overflow: hidden'), 'body should preserve overflow:hidden');
+
+  // Window: max-width/max-height 100%
+  const windowMatch = cssContent.match(/\.window\s*\{[^}]+\}/s);
+  assert.ok(windowMatch, '.window rule should exist');
+  const windowRule = windowMatch[0];
+  assert.ok(windowRule.includes('max-width: 100%'), '.window should use max-width: 100%');
+  assert.ok(windowRule.includes('max-height: 100%'), '.window should use max-height: 100%');
+
+  // Board-scroll: overflow:auto
+  const boardScrollMatch = cssContent.match(/\.board-scroll\s*\{[^}]*overflow:\s*auto[^}]*\}/s);
+  assert.ok(boardScrollMatch, '.board-scroll must have overflow: auto (owns scrolling)');
 });

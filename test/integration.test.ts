@@ -881,19 +881,43 @@ test('UI - getTouchActionSvg returns valid SVG icons for all modes', async () =>
   assert.notStrictEqual(flagSvg, clickSvg, 'SVGs should be distinct');
   assert.notStrictEqual(questionSvg, clickSvg, 'SVGs should be distinct');
 
-  // Question SVG: pixel-style question mark with rect geometry
-  assert.ok(questionSvg.includes('<rect x="10" y="4" width="4" height="4" fill="black"'), 'Question SVG should have pixel question mark geometry');
-  assert.ok(questionSvg.includes('<rect x="6" y="8" width="12" height="2" fill="black"'), 'Question SVG should have question mark bar');
-  assert.ok(questionSvg.includes('<rect x="10" y="2" width="2" height="2" fill="black"'), 'Question SVG should have pixel dots');
+  // Question SVG: wide, connected, bold question mark (not narrow vertical dots)
+  // Must use ~3-unit elements spanning x=3..19 and most of the height
+  // Top horizontal bar: wide (10px), at top
+  assert.ok(questionSvg.includes('<rect x="6" y="3" width="10" height="3" fill="black"'), 'Question SVG should have wide top horizontal bar');
+  // Upper-left slant: 3-unit wide, descending
+  assert.ok(questionSvg.includes('<rect x="3" y="6" width="3" height="5" fill="black"'), 'Question SVG should have 3-unit upper-left slant');
+  // Upper-right slant: 3-unit wide, ascending
+  assert.ok(questionSvg.includes('<rect x="16" y="6" width="3" height="7" fill="black"'), 'Question SVG should have 3-unit upper-right slant');
+  // Lower curve: 6-unit wide
+  assert.ok(questionSvg.includes('<rect x="13" y="13" width="6" height="3" fill="black"'), 'Question SVG should have 6-unit lower curve');
+  // Centered stem: 6-unit wide
+  assert.ok(questionSvg.includes('<rect x="10" y="16" width="6" height="3" fill="black"'), 'Question SVG should have 6-unit centered stem');
+  // Separate dot: 4-unit wide
+  assert.ok(questionSvg.includes('<rect x="10" y="21" width="4" height="3" fill="black"'), 'Question SVG should have 4-unit separate bottom dot');
+  // Reject narrow design (elements too narrow)
+  assert.ok(!questionSvg.includes('x="9" y="5" width="6" height="2"'), 'Question SVG must NOT have narrow elements (x=9..15, width=2-6)');
+  // Verify target rendered size is 20x20
+  assert.ok(questionSvg.includes('width="20" height="20"'), 'Question SVG should have 20x20 target size');
 
-  // Flag SVG: classic Minesweeper/Win95-style flag with red cloth, black staff
+  // Flag SVG: classic Minesweeper/Win95-style flag with red cloth, black staff (unchanged)
   assert.ok(flagSvg.includes('<rect x="9" y="2" width="2" height="20" fill="black"'), 'Flag SVG should have black staff');
   assert.ok(flagSvg.includes('<rect x="8" y="22" width="4" height="2" fill="black"'), 'Flag SVG should have black base');
   assert.ok(flagSvg.includes('<path d="M11 3 L19 7 L11 11 Z" fill="red"'), 'Flag SVG should have red cloth path');
 
-  // Click SVG: pixel-style cursor/click icon with circular base
-  assert.ok(clickSvg.includes('<path d="M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z" fill="black"'), 'Click SVG should have pixel cursor path');
-  assert.ok(clickSvg.includes('<circle cx="12" cy="14" r="3" fill="black"'), 'Click SVG should have circular base');
+  // Click SVG: classic mouse arrow cursor (white fill, black stroke), NOT a star/reticle/circle
+  // White fill for the cursor body, black stroke for clear outline
+  assert.ok(clickSvg.includes('fill="white"'), 'Click SVG should have white fill for cursor body');
+  assert.ok(clickSvg.includes('stroke="black"'), 'Click SVG should have black stroke for outline');
+  // Classic arrow: must point to upper-left (asymmetric geometry)
+  assert.ok(clickSvg.includes('stroke-width="2"'), 'Click SVG should have stroke-width=2');
+  assert.ok(clickSvg.includes('stroke-linejoin="miter"'), 'Click SVG should have stroke-linejoin=miter');
+  // Must have the classic arrow path: M3 2 (top point), down left side, then angles to tip
+  assert.ok(clickSvg.includes('<path d="M3 2 L3 19 L8 14 L12 22 L16 20 L12 13 L20 13 Z"'), 'Click SVG should have classic asymmetric arrow cursor geometry pointing upper-left');
+  // Reject old symmetric star/reticle path starting "M12 2"
+  assert.ok(!clickSvg.includes('M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z'), 'Click SVG must NOT use old symmetric star path');
+  // Verify target rendered size is 20x20
+  assert.ok(clickSvg.includes('width="20" height="20"'), 'Click SVG should have 20x20 target size');
 });
 
 test('CSS - Touch action button has exact square dimensions and flex properties', async () => {

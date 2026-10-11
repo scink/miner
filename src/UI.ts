@@ -1379,14 +1379,15 @@ export class UI {
     // Win95-style icons using crisp pixel art SVG
     switch (mode) {
       case 'question':
-        // Pixel-style question-mark icon
-        return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><rect x="10" y="4" width="4" height="4" fill="black"/><rect x="6" y="8" width="12" height="2" fill="black"/><rect x="6" y="10" width="2" height="6" fill="black"/><rect x="16" y="10" width="2" height="6" fill="black"/><rect x="6" y="16" width="12" height="2" fill="black"/><rect x="10" y="18" width="4" height="2" fill="black"/><rect x="10" y="20" width="2" height="2" fill="black"/><rect x="12" y="20" width="2" height="2" fill="black"/><rect x="10" y="2" width="2" height="2" fill="black"/><rect x="12" y="2" width="2" height="2" fill="black"/></svg>';
+        // Wide, connected, bold question mark (not narrow vertical dots)
+        // Uses 3-unit elements spanning x=3..19 and most of the height
+        return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><rect x="6" y="3" width="10" height="3" fill="black"/><rect x="3" y="6" width="3" height="5" fill="black"/><rect x="16" y="6" width="3" height="7" fill="black"/><rect x="13" y="13" width="6" height="3" fill="black"/><rect x="10" y="16" width="6" height="3" fill="black"/><rect x="10" y="21" width="4" height="3" fill="black"/></svg>';
       case 'flag':
-        // Classic Minesweeper/Win95-style flag icon
+        // Classic Minesweeper/Win95-style flag icon (unchanged)
         return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><rect x="9" y="2" width="2" height="20" fill="black"/><rect x="8" y="22" width="4" height="2" fill="black"/><path d="M11 3 L19 7 L11 11 Z" fill="red" stroke="black" stroke-width="1"/></svg>';
       case 'click':
-        // Pixel-style cursor/click icon
-        return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><path d="M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z" fill="black"/><circle cx="12" cy="14" r="3" fill="black"/></svg>';
+        // Classic mouse arrow cursor: white fill, black stroke, pointing upper-left
+        return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><path d="M3 2 L3 19 L8 14 L12 22 L16 20 L12 13 L20 13 Z" fill="white" stroke="black" stroke-width="2" stroke-linejoin="miter"/></svg>';
       default:
         return '';
     }
