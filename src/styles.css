@@ -705,14 +705,20 @@ body {
   border-left: 2px solid var(--light-gray);
   border-right: 2px solid var(--dark-shadow);
   border-bottom: 2px solid var(--dark-shadow);
-  padding: 6px 12px;
+  padding: 6px;
   font-size: 14px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 60px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+}
+
+.touch-action-button svg {
+  flex: 0 0 auto;
 }
 
 .touch-action-button:hover {
@@ -725,8 +731,8 @@ body {
   border-right-color: var(--light-gray);
   border-bottom-color: var(--light-gray);
   padding-top: 8px;
-  padding-left: 14px;
-  padding-right: 14px;
+  padding-left: 8px;
+  padding-right: 8px;
   padding-bottom: 4px;
 }
 
@@ -738,8 +744,8 @@ body {
   background-color: var(--dark-gray);
   color: var(--text-color);
   padding-top: 8px;
-  padding-left: 14px;
-  padding-right: 14px;
+  padding-left: 8px;
+  padding-right: 8px;
   padding-bottom: 4px;
 }
 

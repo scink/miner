@@ -24,6 +24,10 @@ interface MenuTracker {
   isShown(): boolean;
 }
 
+interface FakeButton extends HTMLButtonElement {
+  clickListeners: (() => void)[];
+}
+
 function createBareUI(UIClass: UIConstructor): UIInstance {
   return Object.create(UIClass.prototype) as UIInstance;
 }
@@ -858,6 +862,122 @@ test('UI - Touch action buttons keep one persistent accessible selection', async
   assert.strictEqual(ui.touchMode, 'question');
   assert.strictEqual(fixture.attributes.get('question')?.get('aria-pressed'), 'true');
   assert.strictEqual(fixture.attributes.get('flag')?.get('aria-pressed'), 'false');
+});
+
+test('UI - getTouchActionSvg returns valid SVG icons for all modes', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  const questionSvg = ui.getTouchActionSvg('question');
+  const flagSvg = ui.getTouchActionSvg('flag');
+  const clickSvg = ui.getTouchActionSvg('click');
+  assert.ok(questionSvg.length > 0 && flagSvg.length > 0 && clickSvg.length > 0, 'All SVGs should be non-empty');
+  assert.ok(questionSvg.includes('shape-rendering="crispEdges"'), 'Question SVG should have crispEdges');
+  assert.ok(flagSvg.includes('shape-rendering="crispEdges"'), 'Flag SVG should have crispEdges');
+  assert.ok(clickSvg.includes('shape-rendering="crispEdges"'), 'Click SVG should have crispEdges');
+  assert.ok(questionSvg.includes('aria-hidden="true"') && questionSvg.includes('focusable="false"'), 'Question SVG should have accessibility attributes');
+  assert.ok(flagSvg.includes('aria-hidden="true"') && flagSvg.includes('focusable="false"'), 'Flag SVG should have accessibility attributes');
+  assert.ok(clickSvg.includes('aria-hidden="true"') && clickSvg.includes('focusable="false"'), 'Click SVG should have accessibility attributes');
+  assert.notStrictEqual(questionSvg, flagSvg, 'SVGs should be distinct');
+  assert.notStrictEqual(flagSvg, clickSvg, 'SVGs should be distinct');
+  assert.notStrictEqual(questionSvg, clickSvg, 'SVGs should be distinct');
+
+  // Question SVG: pixel-style question mark with rect geometry
+  assert.ok(questionSvg.includes('<rect x="10" y="4" width="4" height="4" fill="black"'), 'Question SVG should have pixel question mark geometry');
+  assert.ok(questionSvg.includes('<rect x="6" y="8" width="12" height="2" fill="black"'), 'Question SVG should have question mark bar');
+  assert.ok(questionSvg.includes('<rect x="10" y="2" width="2" height="2" fill="black"'), 'Question SVG should have pixel dots');
+
+  // Flag SVG: classic Minesweeper/Win95-style flag with red cloth, black staff
+  assert.ok(flagSvg.includes('<rect x="9" y="2" width="2" height="20" fill="black"'), 'Flag SVG should have black staff');
+  assert.ok(flagSvg.includes('<rect x="8" y="22" width="4" height="2" fill="black"'), 'Flag SVG should have black base');
+  assert.ok(flagSvg.includes('<path d="M11 3 L19 7 L11 11 Z" fill="red"'), 'Flag SVG should have red cloth path');
+
+  // Click SVG: pixel-style cursor/click icon with circular base
+  assert.ok(clickSvg.includes('<path d="M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z" fill="black"'), 'Click SVG should have pixel cursor path');
+  assert.ok(clickSvg.includes('<circle cx="12" cy="14" r="3" fill="black"'), 'Click SVG should have circular base');
+});
+
+test('CSS - Touch action button has exact square dimensions and flex properties', async () => {
+  const fs = await import('node:fs');
+  const cssContent = fs.readFileSync(new URL('../src/styles.css', import.meta.url).pathname, 'utf8');
+  const touchButtonRule = cssContent.match(/\.touch-action-button\s*\{([^}]+)\}/s);
+  assert.ok(touchButtonRule, '.touch-action-button CSS rule should exist');
+  const ruleContent = touchButtonRule[1];
+  assert.ok(ruleContent.includes('width: 44px;'), 'Should have width: 44px');
+  assert.ok(ruleContent.includes('height: 44px;'), 'Should have height: 44px');
+  assert.ok(ruleContent.includes('flex: 0 0 auto;'), 'Should have flex: 0 0 auto');
+  assert.ok(!ruleContent.includes('min-width: 60px'), 'Should NOT have min-width: 60px');
+  assert.ok(!ruleContent.includes('min-height'), 'Should NOT have min-height');
+  const svgFlexRule = cssContent.match(/\.touch-action-button svg\s*\{([^}]+)\}/s);
+  assert.ok(svgFlexRule, '.touch-action-button svg CSS rule should exist');
+  assert.ok(svgFlexRule[1].includes('flex: 0 0 auto;'), 'SVG child should have flex: 0 0 auto');
+});
+
+function makeFakeButton(): HTMLButtonElement {
+  const attrs: Record<string, string> = {};
+  const btn = {
+    type: '',
+    className: '',
+    dataset: { touchMode: '' },
+    innerHTML: '',
+    textContent: '',
+    clickListeners: [] as (() => void)[],
+    setAttribute: (name: string, value: string) => { attrs[name] = value; },
+    getAttribute: (name: string) => attrs[name] ?? null,
+    hasAttribute: (name: string) => name in attrs,
+    addEventListener: (event: string, listener: () => void) => {
+      if (event === 'click') (btn as FakeButton).clickListeners.push(listener);
+    },
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+    append: () => {},
+  } as unknown as HTMLButtonElement;
+  return btn;
+}
+
+test('UI - createTouchActionButton creates an icon-only accessible button', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const ui = createBareUI(UI);
+  const originalDocument = global.document;
+
+  try {
+    for (const mode of ['question', 'flag', 'click'] as const) {
+      const label = mode === 'question' ? 'Вопрос' : mode === 'flag' ? 'Флаг' : 'Клик';
+      const expectedSvg = ui.getTouchActionSvg(mode);
+
+      global.document = {
+        createElement: (tagName: string) => {
+          if (tagName === 'button') return makeFakeButton();
+          return {
+            className: '', dataset: {}, attributes: {}, style: {},
+            setAttribute: () => {}, getAttribute: () => null, hasAttribute: () => false,
+            append: () => {}, appendChild: () => {}, removeChild: () => {},
+            addEventListener: () => {}, removeEventListener: () => {},
+            querySelector: () => null, querySelectorAll: () => [],
+          } as unknown as HTMLElement;
+        },
+      } as unknown as Document;
+
+      const button = ui.createTouchActionButton(mode, label) as FakeButton;
+
+      assert.strictEqual(button.getAttribute('title'), `${label}: действие при касании`, `Title exact for ${mode}`);
+      assert.strictEqual(button.type, 'button', `type for ${mode}`);
+      assert.strictEqual(button.className, 'touch-action-button', `className for ${mode}`);
+      assert.strictEqual(button.dataset.touchMode, mode, `dataset for ${mode}`);
+      assert.strictEqual(button.getAttribute('aria-label'), `${label}: действие при касании`, `aria-label for ${mode}`);
+      assert.strictEqual(button.getAttribute('aria-pressed'), 'false', `aria-pressed for ${mode}`);
+      assert.strictEqual(button.innerHTML, expectedSvg, `innerHTML exact for ${mode}`);
+      assert.strictEqual(button.textContent, '', `textContent for ${mode}`);
+
+      const clickMode: { mode: string | null } = { mode: null };
+      ui.handleTouchModeClick = (m: string) => { clickMode.mode = m; };
+
+      assert.strictEqual(button.clickListeners.length, 1, `Exactly one click listener for ${mode}`);
+      button.clickListeners[0]();
+      assert.strictEqual(clickMode.mode, mode, `Correct mode dispatched for ${mode}`);
+    }
+  } finally {
+    global.document = originalDocument;
+  }
 });
 
 test('UI - Touch marker actions repeat, replace, and persist through the game model', async () => {

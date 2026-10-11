@@ -255,14 +255,7 @@ export class UI {
       { mode: 'click', label: 'Клик' }
     ];
     for (const action of touchActions) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'touch-action-button';
-      button.dataset.touchMode = action.mode;
-      button.textContent = action.label;
-      button.setAttribute('aria-label', `${action.label}: действие при касании`);
-      button.setAttribute('aria-pressed', 'false');
-      button.addEventListener('click', () => this.handleTouchModeClick(action.mode));
+      const button = this.createTouchActionButton(action.mode, action.label);
       this.element.touchActionPanel.appendChild(button);
       this.element.touchModeButtons.set(action.mode, button);
     }
@@ -1304,6 +1297,48 @@ export class UI {
       default:
         return '<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="gold"/><circle cx="11" cy="12" r="2" fill="black"/><circle cx="21" cy="12" r="2" fill="black"/><path d="M10 20 Q16 24 22 20" stroke="black" stroke-width="2" fill="none"/></svg>';
     }
+  }
+
+  /**
+   * Generate SVG icon for touch action buttons
+   * @param {string} mode - 'question', 'flag', or 'click'
+   * @returns {string}
+   */
+  getTouchActionSvg(mode: TouchMode): string {
+    // Win95-style icons using crisp pixel art SVG
+    switch (mode) {
+      case 'question':
+        // Pixel-style question-mark icon
+        return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><rect x="10" y="4" width="4" height="4" fill="black"/><rect x="6" y="8" width="12" height="2" fill="black"/><rect x="6" y="10" width="2" height="6" fill="black"/><rect x="16" y="10" width="2" height="6" fill="black"/><rect x="6" y="16" width="12" height="2" fill="black"/><rect x="10" y="18" width="4" height="2" fill="black"/><rect x="10" y="20" width="2" height="2" fill="black"/><rect x="12" y="20" width="2" height="2" fill="black"/><rect x="10" y="2" width="2" height="2" fill="black"/><rect x="12" y="2" width="2" height="2" fill="black"/></svg>';
+      case 'flag':
+        // Classic Minesweeper/Win95-style flag icon
+        return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><rect x="9" y="2" width="2" height="20" fill="black"/><rect x="8" y="22" width="4" height="2" fill="black"/><path d="M11 3 L19 7 L11 11 Z" fill="red" stroke="black" stroke-width="1"/></svg>';
+      case 'click':
+        // Pixel-style cursor/click icon
+        return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><path d="M12 2 L16 10 L20 10 L16 14 L18 18 L14 20 L12 22 L10 20 L6 18 L8 14 L4 10 L8 10 Z" fill="black"/><circle cx="12" cy="14" r="3" fill="black"/></svg>';
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * Create touch action button element
+   * Extracted for testability
+   * @param {TouchMode} mode - button mode: 'question', 'flag', or 'click'
+   * @param {string} label - button label text (for aria-label and title)
+   * @returns {HTMLButtonElement}
+   */
+  createTouchActionButton(mode: TouchMode, label: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'touch-action-button';
+    button.dataset.touchMode = mode;
+    button.setAttribute('aria-label', `${label}: действие при касании`);
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('title', `${label}: действие при касании`);
+    button.innerHTML = this.getTouchActionSvg(mode);
+    button.addEventListener('click', () => this.handleTouchModeClick(mode));
+    return button;
   }
 
   /**
