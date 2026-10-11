@@ -912,36 +912,74 @@ export class UI {
   /**
    * Обработка касания (touchstart)
    * Sets up gesture tracking; does not perform actions yet
+   * Only one-finger touchstart is actionable; multi-touch is no-op
    */
   handleTouchStart(e: TouchEvent): void {
+    // Multi-touch guard: must run before closestElement lookup
+    // so adding a second finger outside a cell still clears pending gesture/preview
+    if (e.touches.length !== 1) {
+      this.touchGestureCell = null;
+      this.clearBoardPressing();
+      return;
+    }
+
     const cell = closestElement<HTMLButtonElement>(e, '.cell');
     if (!cell) return;
 
-    // Prevent default to avoid ghost clicks
-    e.preventDefault();
-
+    // touchstart MUST NOT preventDefault to allow native pan/scroll
     const { x, y } = getCellCoordinates(cell);
+
+    // Don't set gesture in PAUSED/WON/LOST states (not actionable)
+    if (this.game.state !== STATE.READY && this.game.state !== STATE.RUNNING) return;
+
     this.touchGestureCell = { x, y, element: cell };
 
-    // Подсветка соседей для chording (если нажато 2 пальца)
-    // Only highlight if game is not paused (chording is no-op while paused anyway)
-    if (this.game.state !== STATE.PAUSED && e.touches.length >= 2) {
-      this.highlightChordNeighbors(x, y);
+    // Show chord preview only on revealed numbered cells (independent of touch mode)
+    // Preview is NOT shown when paused (chording is no-op while paused anyway)
+    if (this.game.state === STATE.RUNNING) {
+      const gameCell = this.game.getCell(x, y);
+      if (gameCell && gameCell.state === CELL_STATE.REVEALED && gameCell.neighbors > 0) {
+        this.highlightChordNeighbors(x, y);
+      }
     }
+  }
+
+  /**
+   * Check if a touch gesture is actionable on touchend
+   * Only valid stationary actionable touchend calls preventDefault
+   */
+  isTouchActionable(x: number, y: number): boolean {
+    // Game state must be READY or RUNNING
+    if (this.game.state !== STATE.READY && this.game.state !== STATE.RUNNING) return false;
+
+    const cell = this.game.getCell(x, y);
+    if (!cell) return false;
+
+    // Revealed numbered cell: true, chords independent of mode
+    if (cell.state === CELL_STATE.REVEALED && cell.neighbors > 0) return true;
+
+    // Revealed zero: false
+    if (cell.state === CELL_STATE.REVEALED) return false;
+
+    // Non-revealed cells: mode-dependent
+    if (this.touchMode === 'flag' || this.touchMode === 'question') return true;
+    if (this.touchMode === 'click') {
+      // click mode: CLOSED or QUESTIONED true; FLAGGED false
+      return cell.state === CELL_STATE.CLOSED || cell.state === CELL_STATE.QUESTIONED;
+    }
+    return false;
   }
 
   /**
    * Обработка касания (touchend)
    * Executes the action if no move/cancel occurred
+   * Only valid stationary actionable touchend calls preventDefault
    */
   handleTouchEnd(e: TouchEvent): void {
     // Always clear the pending gesture, even if paused or no cell
     const gesture = this.touchGestureCell;
     this.touchGestureCell = null;
     this.clearBoardPressing();
-
-    // Touch actions are no-ops while paused
-    if (this.game.state === STATE.PAUSED) return;
 
     // If gesture was cancelled by touchmove/touchcancel, do nothing
     if (!gesture) return;
@@ -953,7 +991,12 @@ export class UI {
 
     // Only execute action on the SAME cell that was touched
     if (x === gesture.x && y === gesture.y) {
-      this.handleTouchAction(x, y);
+      // Check if this is a valid actionable touchend
+      if (this.isTouchActionable(x, y)) {
+        // preventDefault FIRST, then handleTouchAction exactly once
+        e.preventDefault();
+        this.handleTouchAction(x, y);
+      }
     }
   }
 
@@ -970,8 +1013,12 @@ export class UI {
   /**
    * Обработка касания (touchmove)
    * Cancels the pending gesture to prevent ghost clicks
+   * MUST NOT preventDefault to preserve native panning of .board-scroll
    */
-  handleTouchMove(_e: TouchEvent): void {
+  handleTouchMove(e: TouchEvent): void {
+    // touchmove MUST NOT preventDefault to allow native scrolling
+    // e.preventDefault() is intentionally omitted here
+
     // Clear touch gesture state
     this.touchGestureCell = null;
     this.clearBoardPressing();

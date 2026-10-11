@@ -1059,8 +1059,9 @@ test('UI - Touch move and cancel discard the gesture without an action or long p
   ui.handleTouchAction = () => { actionCalls++; };
   ui.clearBoardPressing = () => {};
 
+  // touchstart must NOT preventDefault (native scroll can begin)
   ui.handleTouchStart(start.event);
-  assert.strictEqual(start.wasPrevented(), true);
+  assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT call preventDefault');
   ui.handleTouchMove(createTouchEvent(cell, 1).event);
   ui.handleTouchEnd(end.event);
   assert.strictEqual(actionCalls, 0, 'Moving must cancel the tap action');
@@ -1240,12 +1241,262 @@ test('UI - Touch gesture cleanup is robust on paused/no-cell paths', async () =>
   ui.handleTouchEnd(createTouchEvent(differentCell).event);
   assert.strictEqual(actionCalls, 0, 'No action should be called for different cell');
 
-  // Test 4: touchend on no-cell clears gesture even on paused path
+  // Test 4: touchstart does not arm gesture in PAUSED/WON/LOST
   assert.strictEqual(game.pause(), true);
   ui.handleTouchStart(start.event);
-  assert.ok(ui.touchGestureCell, 'Gesture cell should be set before touchend');
-  ui.handleTouchEnd(end.event);
-  assert.strictEqual(ui.touchGestureCell, null, 'Gesture cell should be cleared even on paused path');
+  assert.strictEqual(ui.touchGestureCell, null, 'PAUSED: no gesture set');
+  game.resume();
+  game.stopTimer();
+});
+
+// Helper: create tracked records with element, added set, removed set, and key
+interface TrackedRecord {
+  element: HTMLButtonElement;
+  added: Set<string>;
+  removed: Set<string>;
+  key: string;
+}
+
+function createTrackedRecord(n?: {x: number, y: number}): TrackedRecord {
+  const added = new Set<string>();
+  const removed = new Set<string>();
+  const classList = {
+    add: (...tokens: string[]) => tokens.forEach(token => added.add(token)),
+    remove: (...tokens: string[]) => tokens.forEach(token => removed.add(token)),
+    contains: (token: string) => added.has(token) && !removed.has(token)
+  } as DOMTokenList;
+  const key = n ? `${n.x},${n.y}` : '';
+
+  return {
+    element: { classList } as HTMLButtonElement,
+    added,
+    removed,
+    key
+  };
+}
+
+test('UI - Touch chord preview is mode-independent and chords once', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 3;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  const neighbors = game.getNeighbors(2, 2);
+  neighbors.forEach(n => {
+    if (n.x === 1 && n.y === 1) n.state = CELL_STATE.CLOSED;
+    else if (n.x === 1 && n.y === 2) n.state = CELL_STATE.FLAGGED;
+    else if (n.x === 1 && n.y === 3) n.state = CELL_STATE.QUESTIONED;
+    else if (n.x === 2 && n.y === 1) n.state = CELL_STATE.REVEALED;
+    else n.state = CELL_STATE.CLOSED;
+  });
+
+  const records: TrackedRecord[] = [];
+  for (const n of neighbors) {
+    const record = createTrackedRecord(n);
+    ui.element.cells.set(`${n.x},${n.y}`, record.element);
+    records.push(record);
+  }
+
+  const cell = createTouchCell(2, 2);
+
+  for (const mode of ['question', 'flag', 'click'] as const) {
+    const start = createTouchEvent(cell, 1);
+    const end = createTouchEvent(cell, 0);
+    const callOrder: string[] = [];
+    let chordCalled = false;
+
+    ui.touchMode = mode;
+    ui.handleCellChord = () => { chordCalled = true; callOrder.push('chord'); };
+    end.event.preventDefault = () => { callOrder.push('prevent'); };
+
+    ui.handleTouchStart(start.event);
+    assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT preventDefault');
+    for (const record of records) {
+      if (record.key === '1,1' || record.key === '1,3' || record.key === '3,1' || record.key === '2,3' || record.key === '3,2' || record.key === '3,3') {
+        assert.ok(record.added.has('pressing'), `${record.key} should get pressing`);
+      } else {
+        assert.ok(!record.added.has('pressing'), `${record.key} should NOT get pressing`);
+      }
+    }
+
+    ui.handleTouchEnd(end.event);
+    assert.ok(chordCalled, `chord should be called in ${mode}`);
+    assert.deepStrictEqual(callOrder, ['prevent', 'chord'], `preventDefault before chord in ${mode}`);
+    assert.strictEqual(ui.touchGestureCell, null, 'gesture cleared after touchend');
+    // Verify pressing was actually removed
+    for (const record of records) {
+      assert.ok(record.removed.has('pressing'), `${record.key} should have pressing removed`);
+    }
+
+    // Reset for next iteration
+    for (const record of records) {
+      record.added.clear();
+      record.removed.clear();
+    }
+  }
+  game.stopTimer();
+});
+
+test('UI - Touch move/cancel preserve native scroll and clear chord preview', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 2;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  const neighbors = game.getNeighbors(2, 2);
+  const records: TrackedRecord[] = [];
+  for (const n of neighbors) {
+    const record = createTrackedRecord(n);
+    ui.element.cells.set(`${n.x},${n.y}`, record.element);
+    records.push(record);
+  }
+
+  const cell = createTouchCell(2, 2);
+  let actionCalls = 0;
+  ui.handleTouchAction = () => { actionCalls++; };
+
+  // Test touchmove
+  const start1 = createTouchEvent(cell, 1);
+  const move1 = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start1.event);
+  assert.strictEqual(start1.wasPrevented(), false, 'touchstart must NOT preventDefault');
+  ui.handleTouchMove(move1.event);
+  assert.strictEqual(move1.wasPrevented(), false, 'touchmove must NOT preventDefault');
+  assert.strictEqual(actionCalls, 0, 'touchmove cancels action');
+  assert.strictEqual(ui.touchGestureCell, null, 'touchmove clears gesture');
+  assert.ok(records.every(r => r.removed.has('pressing')), 'touchmove clears pressing');
+
+  // Reset records for cancel test
+  for (const record of records) {
+    record.added.clear();
+    record.removed.clear();
+  }
+
+  // Test touchcancel
+  const start2 = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start2.event);
+  ui.handleTouchCancel(createTouchEvent(cell, 1).event);
+  assert.strictEqual(actionCalls, 0, 'touchcancel cancels action');
+  assert.strictEqual(ui.touchGestureCell, null, 'touchcancel clears gesture');
+  assert.ok(records.every(r => r.removed.has('pressing')), 'touchcancel clears pressing');
+
+  game.stopTimer();
+});
+
+test('UI - Touch gesture guards reject multi-touch and non-actionable states', async () => {
+  const { UI } = await import('../src/UI.ts');
+  const game = createDeterministicGame(9, 9, 10, []);
+  const ui = createBareUI(UI);
+  ui.game = game;
+  ui.element = createPartialElements({ cells: new Map() });
+
+  game.board[2][2].isMine = false;
+  game.board[2][2].neighbors = 2;
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.state = STATE.RUNNING;
+
+  game.board[1][1].state = CELL_STATE.CLOSED;
+  const record = createTrackedRecord({x: 1, y: 1});
+  ui.element.cells.set('1,1', record.element);
+
+  const cell = createTouchCell(2, 2);
+  ui.touchGestureCell = { x: 2, y: 2, element: cell };
+  record.element.classList.add('pressing');
+
+  const noClosestElement = {
+    closest: () => null, dataset: {}, classList: { add: () => {}, remove: () => {} }
+  } as unknown as HTMLElement;
+  const multiEvent = {
+    target: noClosestElement, touches: Array.from({ length: 2 }, () => ({} as Touch)),
+    preventDefault: () => {}
+  } as unknown as TouchEvent;
+
+  let multiPrevented = false;
+  multiEvent.preventDefault = () => { multiPrevented = true; };
+
+  ui.handleTouchStart(multiEvent);
+  assert.strictEqual(ui.touchGestureCell, null, 'multi-touch clears gesture');
+  assert.ok(!multiPrevented, 'multi-touch must not call preventDefault');
+  assert.ok(!record.element.classList.contains('pressing'), 'multi-touch clears preview');
+
+  // Test PAUSED: no gesture set (not actionable)
+  assert.strictEqual(game.pause(), true);
+  game.state = STATE.PAUSED;
+  const start = createTouchEvent(cell, 1);
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(start.wasPrevented(), false, 'touchstart must NOT preventDefault');
+  assert.strictEqual(ui.touchGestureCell, null, 'PAUSED: no gesture set');
+  game.resume();
+
+  // Test WON/LOST: no gesture set
+  game.state = STATE.WON;
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(ui.touchGestureCell, null, 'WON: no gesture set');
+
+  game.state = STATE.LOST;
+  ui.handleTouchStart(start.event);
+  assert.strictEqual(ui.touchGestureCell, null, 'LOST: no gesture set');
+
+  // Test CLOSED cell: one-finger start/end should work
+  game.state = STATE.RUNNING;
+  game.board[2][2].state = CELL_STATE.CLOSED;
+
+  for (const mode of ['flag', 'question', 'click'] as const) {
+    ui.touchMode = mode;
+    const actionStart = createTouchEvent(cell, 1);
+    const actionEnd = createTouchEvent(cell, 0);
+    let endPrevented = false;
+    let actionCalled = false;
+    let actionCoords: Coordinate | null = null;
+
+    ui.handleTouchAction = (x: number, y: number) => {
+      actionCalled = true;
+      actionCoords = { x, y };
+    };
+    actionEnd.event.preventDefault = () => { endPrevented = true; };
+
+    ui.handleTouchStart(actionStart.event);
+    ui.handleTouchEnd(actionEnd.event);
+
+    assert.strictEqual(endPrevented, true, `closed cell in ${mode} mode: end should preventDefault`);
+    assert.ok(actionCalled, `closed cell in ${mode} mode: handleTouchAction should be called`);
+    assert.deepStrictEqual(actionCoords, { x: 2, y: 2 }, `closed cell in ${mode} mode: correct coords`);
+  }
+
+  // Test revealed zero: should NOT chord, NOT action, and NOT prevent
+  game.board[2][2].state = CELL_STATE.REVEALED;
+  game.board[2][2].neighbors = 0;
+
+  const startZero = createTouchEvent(cell, 1);
+  const endZero = createTouchEvent(cell, 0);
+  let zeroChordCalled = false;
+  let zeroActionCalled = false;
+  let zeroPrevented = false;
+
+  ui.handleCellChord = () => { zeroChordCalled = true; };
+  ui.handleTouchAction = () => { zeroActionCalled = true; };
+  endZero.event.preventDefault = () => { zeroPrevented = true; };
+
+  ui.handleTouchStart(startZero.event);
+  ui.handleTouchEnd(endZero.event);
+
+  assert.strictEqual(zeroPrevented, false, 'revealed zero: end should NOT preventDefault');
+  assert.strictEqual(zeroChordCalled, false, 'revealed zero: should NOT chord');
+  assert.strictEqual(zeroActionCalled, false, 'revealed zero: should NOT call handleTouchAction');
+
+  game.stopTimer();
 });
 
 test('UI - resetGame calls updateCounters (regression)', async () => {
