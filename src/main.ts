@@ -14,9 +14,13 @@ import { UI } from './UI.ts';
 import { ThemeController } from './theme.ts';
 import { createTelegramBridge } from './telegram.ts';
 import { initializePlatformUi } from './platform.ts';
+import { createViewportSizeManager } from './platform-viewport.ts';
 
 type Difficulty = StandardDifficulty | 'custom';
 type StoredConfig = Record<string, unknown>;
+
+// Module-level viewport manager for single instance management
+let viewportManager: { dispose(): void } | null = null;
 
 declare global {
   interface Window {
@@ -158,7 +162,12 @@ function initGame(): void {
   
   // Create Telegram bridge (safe no-op if SDK not available)
   const telegram = createTelegramBridge(window);
-  
+
+  // Create viewport size manager BEFORE UI creation
+  // This ensures CSS variables are set before first layout
+  viewportManager?.dispose();
+  viewportManager = createViewportSizeManager(window, document.documentElement.style);
+
   // Create theme controller with proper dependencies
   const themeController = new ThemeController({
     root: document.documentElement,
