@@ -2448,7 +2448,7 @@ test('DOM - assembleBoardArea appends controls, boardScroll(boardFrame), touchCo
   assert.strictEqual(boardScroll.children.find(c => c.name === 'touch-controls'), undefined, 'touchControls not in boardScroll');
 });
 
-test('CSS - board-area/scroll scroll contract and window percentage constraint', async () => {
+test('CSS - board-area/scroll scroll contract and window max-width/max-height 100%', async () => {
   const fs = await import('node:fs');
   const cssContent = fs.readFileSync(new URL('../src/styles.css', import.meta.url).pathname, 'utf8');
 
@@ -2463,12 +2463,14 @@ test('CSS - board-area/scroll scroll contract and window percentage constraint',
 
   const windowMatch = cssContent.match(/\.window\s*\{([^}]+)\}/s);
   assert.ok(windowMatch, '.window CSS rule should exist');
-  assert.ok(windowMatch[1].includes('--inverse-viewport-constraint: 100%;'), 'window must define inverse constraint');
-  assert.ok(windowMatch[1].includes('max-width: var(--inverse-viewport-constraint);'), 'window max-width uses constraint');
-  assert.ok(windowMatch[1].includes('max-height: var(--inverse-viewport-constraint);'), 'window max-height uses constraint');
+  // After fix: window must use 100% directly, not --inverse-viewport-constraint
+  assert.ok(!windowMatch[1].includes('--inverse-viewport-constraint:'), 'window must NOT use --inverse-viewport-constraint');
+  assert.ok(windowMatch[1].includes('max-width: 100%;'), 'window max-width must be 100%');
+  assert.ok(windowMatch[1].includes('max-height: 100%;'), 'window max-height must be 100%');
+  assert.ok(windowMatch[1].includes('zoom: var(--game-zoom);'), 'window must use zoom from --game-zoom');
 });
 
-test('UI - updateZoomUI sets --inverse-viewport-constraint as percentage at all zoom levels', async () => {
+test('UI - updateZoomUI does NOT set --inverse-viewport-constraint and sets only --game-zoom', async () => {
   const { UI } = await import('../src/UI.ts');
   const ui = createBareUI(UI);
   ui.game = new Minesweeper({ width: 9, height: 9, mines: 10 });
@@ -2492,8 +2494,16 @@ test('UI - updateZoomUI sets --inverse-viewport-constraint as percentage at all 
     ui.zoomLevel = level;
     ui.updateZoomUI();
 
+    // After fix: --inverse-viewport-constraint must NOT be set
     const inverseConstraint = setPropertyCalls.find(c => c.name === '--inverse-viewport-constraint');
-    assert.ok(inverseConstraint, `Level ${level}% must set --inverse-viewport-constraint`);
-    assert.strictEqual(inverseConstraint.value, String(100 / (level / 100)) + '%');
+    assert.strictEqual(inverseConstraint, undefined, `Level ${level}% must NOT set --inverse-viewport-constraint`);
+
+    // Only --game-zoom should be set
+    const gameZoom = setPropertyCalls.find(c => c.name === '--game-zoom');
+    assert.ok(gameZoom, `Level ${level}% must set --game-zoom`);
+    assert.strictEqual(gameZoom.value, String(level / 100), `Level ${level}% --game-zoom value`);
+
+    // data-zoom should also be set
+    assert.strictEqual(windowEl.dataset.zoom, String(level), `Level ${level}% data-zoom value`);
   }
 });

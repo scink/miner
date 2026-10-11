@@ -622,13 +622,9 @@ export class UI {
     const lowerLevel = ZOOM_LEVELS[currentIndex - 1];
     const higherLevel = ZOOM_LEVELS[currentIndex + 1];
     const zoomFactor = this.zoomLevel / 100;
-    const inverseViewportConstraint = String(100 / zoomFactor) + '%';
 
     this.element.window.style.setProperty('--game-zoom', String(zoomFactor));
     this.element.window.dataset.zoom = String(this.zoomLevel);
-    // Expose inverse viewport constraint as percentage for CSS max-width/max-height
-    // At zoom 200%, constraint is 50% (window size is 2x logical, so max-width: 50% fits viewport)
-    this.element.window.style.setProperty('--inverse-viewport-constraint', inverseViewportConstraint);
 
     this.element.zoomOutBtn.disabled = lowerLevel === undefined;
     this.element.zoomInBtn.disabled = higherLevel === undefined;
